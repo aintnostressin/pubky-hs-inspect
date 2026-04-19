@@ -27,17 +27,40 @@ pubky-hs-inspect [URL] <COMMAND>
 
 | Command | Description |
 |---------|-------------|
-| `inspect` | Resolve a PKRR key — show homeserver, endpoints, and storage |
+| `inspect` | Inspect a homeserver — resolve its PKRR, show metadata and user count |
+| `inspect-user` | Inspect a Pubky user — resolve their homeserver, show storage and endpoints |
 | `pkdns` | Query raw PKRR DNS records (SVCB/HTTPS) |
 | `storage` | List public storage entries for a key |
 | `version` | Show tool version |
 
 ### Examples
 
+**Inspect a homeserver** — resolve its PKRR record, show metadata and user count:
+
+```bash
+$ pubky-hs-inspect inspect 9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx
+
+═══ Homeserver Inspection ═══
+
+▸ Homeserver Identity
+   Input:  9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx
+   Z32:    9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx
+
+▸ PKRR Record
+   Target:    myhomeserver.pubky.app
+   Type:      ICANN domain
+   Status:    resolved ✓
+
+▸ Metadata
+   Profile URL: https://_pubky.9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx/pub/pubky.app/profile.json
+   Users:       42
+   Status:      profile fetched ✓
+```
+
 **Inspect a Pubky user** — resolves their homeserver, shows storage, and displays transport URLs:
 
 ```bash
-$ pubky-hs-inspect inspect 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
+$ pubky-hs-inspect inspect-user 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
 
 ═══ PKRR Homeserver Inspection ═══
 
@@ -102,7 +125,7 @@ $ pubky-hs-inspect storage 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
 **Resolve a `pubky://` URL:**
 
 ```bash
-$ pubky-hs-inspect inspect pubky<8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty>/pub/file.json
+$ pubky-hs-inspect inspect-user pubky<8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty>/pub/file.json
 ```
 
 ## License
