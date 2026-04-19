@@ -1,8 +1,8 @@
 //! Integration tests for pubky-hs-inspect CLI commands.
 //!
 //! These tests verify CLI parsing, command routing, and output structure.
-//! Full integration tests using EphemeralTestnet are marked with #[ignore]
-//! and require a working pubky-testnet dependency.
+//! Full integration tests using EphemeralTestnet spin up a local DHT +
+//! homeserver with embedded PostgreSQL for offline testing.
 
 use clap::Parser;
 
@@ -254,21 +254,18 @@ async fn setup_testnet() -> TestContext {
 }
 
 /// Helper to create a test user on the testnet.
-/// Returns (session, user_z32, homeserver_z32).
-async fn create_test_user(
-    ctx: &TestContext,
-) -> (pubky_testnet::pubky::PubkySession, String, String) {
-    let keypair = ctx.pubky.signer(pubky_testnet::pubky::Keypair::random());
+/// Returns (session, user_z32).
+async fn create_test_user(ctx: &TestContext) -> (pubky_testnet::pubky::PubkySession, String) {
+    let signer = ctx.pubky.signer(pubky_testnet::pubky::Keypair::random());
 
-    let session = keypair
+    let session = signer
         .signup(&ctx.homeserver_pub_key, None)
         .await
         .expect("user signup should succeed");
 
     let user_z32 = session.info().public_key().z32();
-    let hs_z32 = ctx.homeserver_pub_key.z32();
 
-    (session, user_z32, hs_z32)
+    (session, user_z32)
 }
 
 /// Test inspect homeserver against a local testnet.
@@ -296,7 +293,7 @@ async fn test_inspect_homeserver_integration() {
 
 async fn test_inspect_user_integration() {
     let ctx = setup_testnet().await;
-    let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
+    let (_session, user_z32) = create_test_user(&ctx).await;
 
     // Run the inspect-user command
     let cli = Cli::parse_from(["pubky-hs-inspect", "inspect-user", &user_z32]);
@@ -305,9 +302,6 @@ async fn test_inspect_user_integration() {
         result.is_ok(),
         "inspect-user command should succeed against testnet"
     );
-
-    // Clean up
-    drop(session);
 }
 
 /// Test storage listing against a local testnet.
@@ -317,7 +311,7 @@ async fn test_inspect_user_integration() {
 
 async fn test_storage_listing_integration() {
     let ctx = setup_testnet().await;
-    let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
+    let (session, user_z32) = create_test_user(&ctx).await;
 
     // Upload a test file to public storage
     session
@@ -335,9 +329,6 @@ async fn test_storage_listing_integration() {
         result.is_ok(),
         "storage command should succeed against testnet"
     );
-
-    // Clean up
-    drop(session);
 }
 
 /// Test ls listing against a local testnet.
@@ -347,7 +338,7 @@ async fn test_storage_listing_integration() {
 
 async fn test_ls_listing_integration() {
     let ctx = setup_testnet().await;
-    let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
+    let (session, user_z32) = create_test_user(&ctx).await;
 
     // Upload multiple test files in a directory structure
     session
@@ -390,9 +381,6 @@ async fn test_ls_listing_integration() {
         result.is_ok(),
         "ls command with path should succeed against testnet"
     );
-
-    // Clean up
-    drop(session);
 }
 
 /// Test events against a local testnet.
@@ -402,7 +390,7 @@ async fn test_ls_listing_integration() {
 
 async fn test_events_integration() {
     let ctx = setup_testnet().await;
-    let (session, _user_z32, _hs_z32) = create_test_user(&ctx).await;
+    let (session, _user_z32) = create_test_user(&ctx).await;
 
     // Upload files to trigger events
     session
@@ -429,7 +417,4 @@ async fn test_events_integration() {
         result.is_ok(),
         "events command should succeed against testnet"
     );
-
-    // Clean up
-    drop(session);
 }
