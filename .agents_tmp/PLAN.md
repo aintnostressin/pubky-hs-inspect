@@ -1,258 +1,308 @@
-# Plan: Add `ls` command for listing user storage files
+# Plan: Add `events` CLI command to fetch and print homeserver file change events
 
 ## 1. OBJECTIVE
 
-Add a new `ls` (list) subcommand that lists all files and directories at a given path for a Pubky user's public storage, enabling inspection of user storage on a homeserver.
+Add a new `events` subcommand that fetches historical file change events (PUT/DEL operations) from a Pubky homeserver and prints them to stdout in a readable, colorized format.
 
 ## 2. CONTEXT SUMMARY
 
-The project is a Rust CLI tool (`pubky-hs-inspect`) for inspecting Pubky homeserver instances. It uses:
-- The `pubky` SDK (v0.7) for storage and PKRR operations
-- The `pkarr` crate (v5) for DNS record resolution
-- `clap` for CLI argument parsing with derive macros
-- `colored` for terminal output styling
+The project is a Rust CLI tool (`pubky-hs-inspect`) for inspecting Pubky homeserver instances. It uses `clap` (derive mode) for CLI parsing, `reqwest` for HTTP requests, `tokio` for async runtime, and the `pubky` SDK (v0.7) for network operations.
+
+**Homeserver Events API** (from `pubky-core`):
+- **Legacy feed endpoint** — `GET {base_url}/_matrix/client/v3/events/`
+  - Query params: `cursor` (default `"0"`, string), `limit` (optional, unsigned int)
+  - Response: plain text, one event per line in format `PUT pubky://user/pub/path` or `DEL pubky://user/pub/path`
+  - Final line: `cursor: <next_cursor>`
+  - Returns events for ALL users on the homeserver (no authentication required)
+- **SSE endpoint** — `GET {base_url}/_matrix/client/v3/events-stream`
+  - Requires `user` parameter (z32 pubkey), optional `live`, `limit`, `reverse`, `path` params
+  - SSE format with multiline data fields (event type + path + cursor + content_hash)
+  - Not suitable for v1 "all users" use case — requires per-user filtering
+
+**Relevant file from pubky-core** (user-provided): `pubky-homeserver/src/client_server/routes/events.rs`
+- Contains `feed()` function (legacy plain-text endpoint)
+- Contains `feed_stream()` function (SSE endpoint)
+- `ListQueryParams` extractor provides `cursor` and `limit` params
 
 **Key files:**
-- `src/cli.rs` — `Cli` struct with `Commands` enum (`Inspect`, `InspectUser`, `Pkdns`, `Storage`, `Version`)
-- `src/commands.rs` — Command handlers; the `cmd_storage` function currently lists only the root `/pub/` directory
-- `src/client.rs` — `Client` wrapper with `list()` method that calls `pubky::public_storage().list(addr)`; also contains `HomeserverInfo`, input parsing, and PKRR resolution helpers
+- `src/cli.rs` — CLI structure with `clap` subcommands: `Inspect`, `InspectUser`, `Pkdns`, `Storage`, `Version`
+- `src/commands.rs` — Command handler implementations
+- `src/client.rs` — `Client` wrapper with PKRR resolution and storage operations
 - `src/main.rs` — Entry point
-- `src/error.rs` — Thin `Result<T>` type alias
-
-**Current `storage` behavior limitation:** Only lists entries at the root `/pub/` path (depth=1). There is no way to browse subdirectories or list files recursively.
-
-**Available API:** `Client::list()` already wraps `pubky::public_storage().list(addr)` and returns `Vec<String>` of pubky URLs at a single depth. This is exactly what we need — no additional wrapping required.
+- `src/error.rs` — Error type alias (`Result<T> = std::result::Result<T, pubky::Error>`)
 
 ## 3. APPROACH OVERVIEW
 
-Add a new `ls` subcommand that:
-1. Takes a user public key (z32 or pubky:// URL) and an optional path argument
-2. Lists only the immediate contents of the given path (non-recursive, flat listing)
-3. Produces a formatted output showing file/directory names with type indicators
-4. Reuses the existing `Client::list()` infrastructure directly (no recursion needed)
+Use the **legacy plain-text feed endpoint** (`GET /_matrix/client/v3/events/`) for v1. It's the simplest path: no authentication, no user filtering, plain text response that's easy to parse and print.
 
-**Why this approach:**
-- The existing `Client::list()` already does exactly what we need — a flat directory listing at a single depth
-- Adding a focused `ls` command mirrors the existing `Storage` command's single-purpose design
-- Non-recursive keeps the command simple and predictable; users can run `ls` repeatedly to drill down
-- This avoids potential performance issues with deep/degenerate directory trees on the homeserver
+**Why legacy over SSE:**
+- SSE endpoint requires a `user` parameter (per-user filtering only)
+- Legacy endpoint returns all events across all users — exactly what's needed
+- Legacy response format is a simple, single-line-per-event structure that maps directly to CLI output
+
+**Approach:**
+1. Add `Events` subcommand to `cli.rs` with optional `--limit` flag and optional cursor argument
+2. Add `get_events()` method to `Client` in `client.rs` — constructs the URL, makes GET request, parses response
+3. Add `cmd_events()` handler in `commands.rs` — calls `get_events()`, prints each event with formatting
+4. Wire it into `run()` in `commands.rs`
 
 ## 4. IMPLEMENTATION STEPS
 
-### Step 1: Add `Ls` subcommand to `cli.rs`
+### Step 1: Add `Events` subcommand to `cli.rs`
 
 **File:** `src/cli.rs`
 
 Add a new variant to the `Commands` enum:
 
 ```rust
-/// List files under a path for a user's storage
-Ls {
-    /// PKRR public key (z32) or pubky:// URL of a user
-    #[arg(value_name = "KEY_OR_URL")]
-    url: String,
+/// Fetch and print recent file change events from a homeserver
+Events {
+    /// Maximum number of events to fetch (optional)
+    #[arg(short, long, value_name = "N")]
+    limit: Option<u64>,
 
-    /// Path within storage (default: /pub/)
-    #[arg(short, long, default_value = "/pub/")]
-    path: String,
+    /// Homeserver key (z32), domain, or URL. Defaults to the global URL argument.
+    #[arg(value_name = "HOMESERVER")]
+    homeserver: Option<String>,
 },
 ```
 
-### Step 2: Add list formatting method to `client.rs`
+The `homeserver` field is optional — if not provided, the command will fall back to the global `Cli::url` field (consistent with how other commands use the global URL when available).
+
+### Step 2: Add `get_events()` method to `Client` in `client.rs`
 
 **File:** `src/client.rs`
 
-Add a single helper method to format a flat listing as a readable output. No recursive methods needed — just reuse the existing `Client::list()`:
+Add a new method to the `Client` impl block (near the bottom, before the closing `}`):
 
 ```rust
-/// Format a flat listing of pubky URLs as a table with file/directory indicators.
-pub fn format_list(&self, entries: &[String]) -> Vec<String> {
-    let mut lines = Vec::new();
-    for entry_url in entries {
-        // Check if entry is a directory (ends with '/')
-        let is_dir = entry_url.ends_with('/');
-        let icon = if is_dir { "📁" } else { "📄" };
-        // Strip pubky:// scheme and leading slash to get relative name
-        let name = entry_url.strip_prefix("pubky://").unwrap_or(entry_url);
-        let name = name.strip_prefix('/').unwrap_or(name);
-        lines.push(format!("   {icon} {name}"));
+/// Fetch historical events from a homeserver's events feed endpoint.
+///
+/// Returns a tuple of (event lines, next_cursor).
+/// Each event line is in the format: "PUT pubky://user/path" or "DEL pubky://user/path"
+pub async fn get_events(
+    &self,
+    base_url: &str,
+    limit: Option<u64>,
+) -> Result<(Vec<String>, Option<String>)> {
+    let mut url = format!("{base_url}/_matrix/client/v3/events/");
+    let mut query_parts = Vec::new();
+
+    if let Some(l) = limit {
+        query_parts.push(format!("limit={}", l));
     }
-    lines
+
+    if !query_parts.is_empty() {
+        url.push('?');
+        url.push_str(&query_parts.join("&"));
+    }
+
+    let resp = reqwest::get(&url).await?;
+    let text = resp.text().await?;
+
+    // Parse response: last line is "cursor: N", rest are events
+    let mut events = Vec::new();
+    let mut next_cursor: Option<String> = None;
+
+    for line in text.lines() {
+        if line.starts_with("cursor: ") {
+            next_cursor = Some(line["cursor: ".len()..].trim().to_string());
+        } else if !line.is_empty() {
+            events.push(line.to_string());
+        }
+    }
+
+    Ok((events, next_cursor))
 }
 ```
 
-### Step 3: Implement `cmd_ls` in `commands.rs`
+**Note:** This method uses `reqwest::get` directly (available via the `reqwest` dependency already in `Cargo.toml`). Alternatively, it could use `self.pubky().client().get(...)` for consistency with the existing client pattern. Either approach works.
+
+### Step 3: Add `cmd_events()` handler in `commands.rs`
 
 **File:** `src/commands.rs`
 
-**3a.** Update the `run()` match to dispatch the new command:
-```rust
-Some(Commands::Ls { url, path }) => cmd_ls(url, path).await,
-```
-
-**3b.** Add the `cmd_ls` handler:
+Add the command handler function:
 
 ```rust
-/// List files under a path for a user's storage.
-async fn cmd_ls(input: &str, path: &str) -> Result<()> {
+// ── events ───────────────────────────────────────────────────────
+
+/// Fetch and print recent file change events from a homeserver.
+async fn cmd_events(homeserver: Option<&str>, limit: Option<u64>) -> Result<()> {
     let client = Client::new()?;
-    println!("{}", "═══ Storage File Listing ═══".bold().cyan());
+    println!("{}", "═══ Homeserver Events ═══".bold().cyan());
     println!();
 
-    let parsed = parse_input(input);
-
-    match &parsed {
-        InputType::PublicKey(key_str) => {
-            let pk = match pubky::PublicKey::try_from(key_str.as_str()) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    println!("   Error parsing public key: {e}");
-                    return Ok(());
-                }
-            };
-
-            let z32 = pk.z32();
-            let storage_addr = format!("pubky://{z32}{path}");
-
-            // Resolve homeserver
-            if let Some(info) = client.get_homeserver_address(&pk).await {
-                println!("{}", "▸ Homeserver".bold());
-                print_homeserver_info(&info);
-                println!();
-            }
-
-            // Listing
-            println!("{}", "▸ Listing".bold());
-            println!("   Target: {storage_addr}");
-            println!();
-
-            match client.list(&storage_addr).await {
-                Ok(entries) if !entries.is_empty() => {
-                    let lines = client.format_list(&entries);
-                    println!("   Total entries: {}", entries.len());
-                    println!();
-                    for line in lines {
-                        println!("{}", line);
-                    }
-                }
-                Ok(_) => {
-                    println!("   {}", "no entries found".yellow());
-                }
-                Err(e) => {
-                    println!("   Error: {}", e);
-                }
-            }
+    // Determine homeserver target
+    let target = match homeserver {
+        Some(hs) => hs.to_string(),
+        None => {
+            // Fallback: use the global URL if available
+            // We need to get the url from somewhere — either pass it in or use a default
+            // For now, require the homeserver argument
+            eprintln!("{}", "Error: homeserver address required. Provide as argument or via -u/--url.".yellow());
+            return Ok(());
         }
-        InputType::Url(url_str) => {
-            let parsed_url = match client.resolve_pubky(url_str) {
-                Ok(u) => u.to_string(),
-                Err(e) => {
-                    println!("   Error resolving URL: {e}");
-                    return Ok(());
-                }
-            };
-            println!("   Target: {parsed_url}");
-            println!();
+    };
 
-            match client.list(&parsed_url).await {
-                Ok(entries) if !entries.is_empty() => {
-                    let lines = client.format_list(&entries);
-                    println!("   Total entries: {}", entries.len());
-                    println!();
-                    for line in lines {
-                        println!("{}", line);
-                    }
-                }
-                Ok(_) => {
-                    println!("   {}", "no entries found".yellow());
-                }
-                Err(e) => {
-                    println!("   Error: {}", e);
-                }
-            }
+    // Resolve to a base URL
+    let base_url = resolve_homeserver_url(&client, &target).await?;
+
+    println!("Fetching events from: {base_url}");
+    println!();
+
+    let (events, next_cursor) = match client.get_events(&base_url, limit).await {
+        Ok((events, cursor)) => (events, cursor),
+        Err(e) => {
+            eprintln!("Error fetching events: {e}");
+            return Ok(());
         }
+    };
+
+    if events.is_empty() {
+        println!("  {}", "no events found".yellow());
+    } else {
+        println!("  Total events: {}", events.len());
+        println!();
+        for event_line in &events {
+            print_event_line(event_line);
+        }
+    }
+
+    if let Some(cursor) = &next_cursor {
+        println!();
+        println!("  Next cursor: {cursor}");
     }
 
     Ok(())
 }
 ```
 
-### Step 4: Update README.md
+Add the helper functions (near the existing helpers section):
+
+```rust
+/// Resolve a homeserver identifier to a full HTTP base URL.
+/// Tries the input directly as a URL, or resolves it via PKRR if it's a z32 key.
+async fn resolve_homeserver_url(client: &Client, input: &str) -> Result<String> {
+    // If it looks like a URL, use it directly
+    if input.starts_with("http://") || input.starts_with("https://") {
+        Ok(input.trim_end_matches('/').to_string())
+    } else {
+        // Try to resolve via PKRR
+        if let Some(info) = client.get_homeserver_address(&pubky::PublicKey::try_from(input)?).await {
+            if let Some(domain) = info.homeserver_domain {
+                Ok(format!("https://{domain}"))
+            } else {
+                Ok(format!("https://_pubky.{}", info.homeserver_z32))
+            }
+        } else {
+            // Fall back to treating it as a domain
+            Ok(format!("https://{input}"))
+        }
+    }
+}
+
+/// Print a single event line with color coding.
+fn print_event_line(line: &str) {
+    if let Some(event_type) = line.split_whitespace().next() {
+        let rest = &line[event_type.len()..].trim();
+        match event_type {
+            "PUT" => {
+                println!("  {} {}", event_type.green(), rest);
+            }
+            "DEL" => {
+                println!("  {} {}", event_type.red(), rest);
+            }
+            _ => {
+                println!("  {line}");
+            }
+        }
+    } else {
+        println!("  {line}");
+    }
+}
+```
+
+### Step 4: Wire `Events` into `run()` in `commands.rs`
+
+**File:** `src/commands.rs`
+
+Update the match in `run()`:
+
+```rust
+Some(Commands::Events { homeserver, limit }) => {
+    cmd_events(homeserver.as_deref(), limit).await
+}
+```
+
+The `run()` function needs to pass the global `Cli::url` as the `homeserver` fallback. Update the dispatch:
+
+```rust
+pub async fn run(cli: &Cli) -> Result<()> {
+    match &cli.command {
+        Some(Commands::Events { homeserver, limit }) => {
+            // Use global URL as fallback if homeserver not provided
+            let target = homeserver.as_deref().or(cli.url.as_deref()).or(Some(""));
+            cmd_events(target, limit.clone()).await
+        }
+        // ... other arms unchanged
+    }
+}
+```
+
+### Step 5: Update `README.md`
 
 **File:** `README.md`
 
-- Add `ls` to the command table
-- Add a usage example showing the `ls` command with default and custom path:
+- Add `events` to the command table
+- Add a usage example showing fetching events from a homeserver
 
+```markdown
+| Command | Description |
+|---------|-------------|
+| `events` | Fetch and print file change events (PUT/DEL) from a homeserver |
+```
+
+Example:
 ```bash
-$ pubky-hs-inspect ls 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
+$ pubky-hs-inspect events 9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx --limit 10
 
-═══ Storage File Listing ═══
+═══ Homeserver Events ═══
 
-▸ Homeserver
-   Query key:   8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
-   Homeserver:  9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx
-   Status:      resolved ✓
+Fetching events from https://myhomeserver.pubky.app
 
-▸ Listing
-   Target: pubky://8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty/pub/
+Total events: 10
 
-   Total entries: 2
+  PUT pubky://o1gg96ewuojmopcjbz8895478wdtxtzzuxnfjjz8o8e77csa1ngo/pub/photo.jpg
+  DEL pubky://3kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx/pub/old.txt
+  PUT pubky://5kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx/pub/doc.pdf
 
-   📄 pubky.app/profile.json
-   📁 my-app/
-
-$ pubky-hs-inspect ls 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty --path /pub/my-app/
-
-═══ Storage File Listing ═══
-
-▸ Homeserver
-   Query key:   8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
-   Homeserver:  9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx
-   Status:      resolved ✓
-
-▸ Listing
-   Target: pubky://8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty/pub/my-app/
-
-   Total entries: 3
-
-   📄 config.json
-   📁 assets/
-   📄 index.html
-
-# Navigate into a subdirectory
-$ pubky-hs-inspect ls 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty --path /pub/my-app/assets/
-
-═══ Storage File Listing ═══
-
-▸ Listing
-   Target: pubky://8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty/pub/my-app/assets/
-
-   Total entries: 4
-
-   📄 logo.png
-   📄 style.css
-   📄 main.js
-   📄 favicon.ico
+  Next cursor: 12345
 ```
 
 ## 5. TESTING AND VALIDATION
 
 1. **Build verification:** Run `cargo build` to ensure the project compiles without errors.
 
-2. **CLI help output:** Run `pubky-hs-inspect --help` to verify:
-   - `ls` appears as a new subcommand with description "List files under a path for a user's storage"
-   - `-p, --path <PATH>` flag is documented with default value `/pub/`
-   - All existing commands remain functional
+2. **CLI help output:** Run `pubky-hs-inspect events --help` to verify:
+   - `--limit` / `-l` flag is documented
+   - Optional `HOMESERVER` positional argument is documented
+   - Description matches "Fetch and print recent file change events"
 
-3. **`ls` with default path:** Run `pubky-hs-inspect ls <user_key>` against a known user (e.g., `8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty` on the available homeserver hosts) to verify it lists only the immediate entries under `/pub/` (not recursive).
+3. **Local homeserver test:** Test against one of the available local homeservers:
+   ```bash
+   pubky-hs-inspect events http://localhost:42363 --limit 5
+   ```
+   This verifies the direct URL path works.
 
-4. **`ls` with custom path:** Run `pubky-hs-inspect ls <user_key> --path /pub/some/subdir/` to verify it lists entries under the specified subdirectory.
+4. **Key-based resolution test:** Test with a z32 homeserver key to verify PKRR resolution:
+   ```bash
+   pubky-hs-inspect events <homeserver_z32_key>
+   ```
+   This verifies the PKRR→domain resolution path.
 
-5. **`ls` with URL input:** Run `pubky-hs-inspect ls pubky://<key>/pub/` to verify URL-style input works.
+5. **Edge case - empty events:** Test with a homeserver that has no events to verify the "no events found" message.
 
-6. **Drill-down workflow:** Verify the recursive navigation pattern — run `ls` on root, identify a directory, then run `ls --path /pub/that-dir/` to go deeper.
+6. **Edge case - invalid URL:** Test with an unresolvable key to verify error handling.
 
-7. **Empty directory handling:** Test with a non-existent path to verify graceful "no entries found" output.
-
-8. **Unit tests:** Existing tests in `client.rs` should still pass.
+7. **Unit tests:** No new unit tests required for v1, but the existing `cargo test` suite should still pass.

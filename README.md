@@ -10,6 +10,7 @@ Resolve PKRR records, query homeserver endpoints, and browse public storage — 
 - **Inspect homeservers** — discover the homeserver domain or pubkey-as-host for a user
 - **Browse public storage** — list and fetch resources from a user's public storage
 - **List storage entries** — browse files and directories with type indicators
+- **Track file changes** — fetch historical PUT/DEL events from a homeserver
 - **Transport URL resolution** — convert `pubky://` URLs to HTTPS endpoints
 
 ## Installation
@@ -33,6 +34,7 @@ pubky-hs-inspect [URL] <COMMAND>
 | `pkdns` | Query raw PKRR DNS records (SVCB/HTTPS) |
 | `storage` | List public storage entries for a key |
 | `ls` | List files under a path for a user's storage |
+| `events` | Fetch and print file change events (PUT/DEL) from a homeserver |
 | `version` | Show tool version |
 
 ### Examples
@@ -176,6 +178,24 @@ $ pubky-hs-inspect ls 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty --pat
    📄 style.css
    📄 main.js
    📄 favicon.ico
+```
+
+**Fetch file change events from a homeserver:**
+
+```bash
+$ pubky-hs-inspect events http://localhost:42363 --limit 5
+
+═══ Homeserver Events ═══
+
+Fetching events from http://localhost:42363
+
+  Total events: 3
+
+  PUT pubky://o1gg96ewuojmopcjbz8895478wdtxtzzuxnfjjz8o8e77csa1ngo/pub/photo.jpg
+  DEL pubky://3kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx/pub/old.txt
+  PUT pubky://5kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx/pub/doc.pdf
+
+  Next cursor: 12345
 ```
 
 **Resolve a `pubky://` URL:**
