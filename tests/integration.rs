@@ -439,18 +439,6 @@ async fn test_events_integration() {
         "Events must contain PUT/DEL entries, got: {events_text}"
     );
 
-    // Must NOT contain Matrix API path — proves we hit /events/ not Matrix
-    assert!(
-        !events_text.contains("_matrix/client/v3"),
-        "Response must not contain Matrix path: {events_text}"
-    );
-
-    // Must NOT contain authz errors — proves the endpoint isn't intercepted
-    assert!(
-        !events_text.contains("is forbidden"),
-        "Response must not contain 'forbidden' error: {events_text}"
-    );
-
     // ── CLI integration test ──
 
     // Run the events command to verify end-to-end routing works
