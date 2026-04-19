@@ -1,8 +1,8 @@
 use colored::Colorize;
 
 use crate::client::{parse_input, Client, InputType};
-use crate::error::Result;
 use crate::commands::shared;
+use crate::error::Result;
 
 /// List files under a path for a user's storage.
 pub async fn cmd_ls(input: &str, path: &str) -> Result<()> {

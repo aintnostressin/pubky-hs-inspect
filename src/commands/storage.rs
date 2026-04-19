@@ -1,8 +1,8 @@
 use colored::Colorize;
 
 use crate::client::{parse_input, Client, InputType};
-use crate::error::Result;
 use crate::commands::shared;
+use crate::error::Result;
 
 /// Inspect public storage for a PKRR public key.
 pub async fn cmd_storage(input: &str) -> Result<()> {

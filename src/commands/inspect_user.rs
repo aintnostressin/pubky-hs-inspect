@@ -1,8 +1,8 @@
 use colored::Colorize;
 
 use crate::client::{parse_input, Client, InputType};
-use crate::error::Result;
 use crate::commands::shared;
+use crate::error::Result;
 
 /// Inspect a Pubky user — resolve their homeserver, show storage and endpoints.
 pub async fn cmd_inspect_user(input: &str) -> Result<()> {
