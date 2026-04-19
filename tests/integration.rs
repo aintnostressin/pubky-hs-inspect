@@ -1,7 +1,8 @@
 //! Integration tests for pubky-hs-inspect CLI commands.
 //!
 //! These tests verify CLI parsing, command routing, and output structure.
-//! Network-dependent tests are marked with #[ignore] and require a running testnet.
+//! Full integration tests using EphemeralTestnet are marked with #[ignore]
+//! and require a working pubky-testnet dependency.
 
 use clap::Parser;
 
@@ -220,47 +221,19 @@ async fn test_events_without_homeserver() {
     );
 }
 
-// ── Integration tests requiring testnet (marked ignore) ────────────
-// These tests require pubky-testnet to be working. They are marked with
-// #[ignore] and can be run with: cargo test --test integration -- --ignored
+// ── Integration tests requiring EphemeralTestnet ───────────────────
+// These tests use pubky-testnet::EphemeralTestnet to spin up a local
+// DHT + homeserver + relay for fully offline testing.
+//
+// To run these tests:
+// 1. Uncomment pubky-testnet in Cargo.toml dev-dependencies
+// 2. Ensure the dependency compiles (may require fixing upstream issues)
+// 3. Run: cargo test --test integration -- --ignored
+//
+// Note: These tests are currently disabled due to pubky-testnet
+// compilation issues with simple-dns 0.11.2.
 
-/// Test inspect homeserver against a local testnet
-#[tokio::test]
-#[ignore = "requires pubky-testnet"]
-async fn test_inspect_homeserver_integration() {
-    // This test requires pubky-testnet to compile and run
-    // When the dependency issues are resolved, this test will:
-    // 1. Build an EphemeralTestnet
-    // 2. Get the homeserver z32 key
-    // 3. Run inspect <homeserver_z32>
-    // 4. Verify the output contains expected sections
-    todo!("Implement when pubky-testnet dependencies are resolved");
-}
-
-/// Test inspect-user against a local testnet
-#[tokio::test]
-#[ignore = "requires pubky-testnet"]
-async fn test_inspect_user_integration() {
-    todo!("Implement when pubky-testnet dependencies are resolved");
-}
-
-/// Test storage listing against a local testnet
-#[tokio::test]
-#[ignore = "requires pubky-testnet"]
-async fn test_storage_listing_integration() {
-    todo!("Implement when pubky-testnet dependencies are resolved");
-}
-
-/// Test ls listing against a local testnet
-#[tokio::test]
-#[ignore = "requires pubky-testnet"]
-async fn test_ls_listing_integration() {
-    todo!("Implement when pubky-testnet dependencies are resolved");
-}
-
-/// Test events against a local testnet
-#[tokio::test]
-#[ignore = "requires pubky-testnet"]
-async fn test_events_integration() {
-    todo!("Implement when pubky-testnet dependencies are resolved");
-}
+// TODO: Uncomment when pubky-testnet dependency is fixed
+// #[tokio::test]
+// #[ignore = "requires working pubky-testnet dependency"]
+// async fn test_inspect_homeserver_integration() { ... }
