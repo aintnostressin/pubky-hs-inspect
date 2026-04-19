@@ -690,15 +690,34 @@ async fn test_events_stream_live_consumption() {
     let ctx = setup_testnet().await;
     let (session, user_z32) = create_test_user(&ctx).await;
 
-    // Upload files to trigger events on the homeserver
-    let _ = session
+    let base_url = ctx.testnet.homeserver_app().icann_http_url().to_string();
+    let client = Client::new().unwrap();
+
+    // ── 1. Open the stream BEFORE triggering events ──
+
+    // Use stream_events_streamed (the live path) with a generous limit
+    // so we keep the connection alive long enough to receive events.
+    let mut stream = client
+        .stream_events_streamed(&base_url, Some(&user_z32), Some(10), false)
+        .await
+        .expect("stream_events_streamed should succeed");
+
+    // Small delay to let the HTTP connection establish on the server side
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+    // ── 2. Trigger events AFTER the stream is open ──
+
+    // Upload files to trigger events on the homeserver — these should
+    // arrive on the open stream in real-time (pushed by the server).
+    let upload_fut1 = session
         .storage()
         .put("/pub/live-test-1.txt", "live content 1")
         .await
         .expect("file upload should succeed")
         .error_for_status()
         .unwrap();
-    let _ = session
+
+    let upload_fut2 = session
         .storage()
         .put("/pub/live-test-2.txt", "live content 2")
         .await
@@ -706,31 +725,32 @@ async fn test_events_stream_live_consumption() {
         .error_for_status()
         .unwrap();
 
-    let base_url = ctx.testnet.homeserver_app().icann_http_url().to_string();
-    let client = Client::new().unwrap();
+    // Drop the upload handles to ensure the requests are fully sent
+    drop(upload_fut1);
+    drop(upload_fut2);
 
-    // Use stream_events_streamed (the live path) with a limit of 2
-    let mut stream = client
-        .stream_events_streamed(&base_url, Some(&user_z32), Some(2), false)
-        .await
-        .expect("stream_events_streamed should succeed");
+    // ── 3. Collect events arriving on the stream ──
 
     let mut events: Vec<pubky_hs_inspect::commands::shared::SseEvent> = Vec::new();
-    let mut i = 0;
-    while let Some(result) = stream.next().await {
+    let timeout_duration = tokio::time::Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + timeout_duration;
+
+    while let Some(result) = tokio::time::timeout_at(deadline, stream.next()).await {
         match result {
-            Ok(event) => {
+            Some(Ok(event)) => {
                 events.push(event);
-                i += 1;
-                // Should stop after limit of 2 (but stream may continue if server doesn't honor limit)
-                if i >= 5 {
-                    // Safety valve — don't hang forever
+                // Once we have enough events, stop — no need to wait for timeout
+                if events.len() >= 2 {
                     break;
                 }
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 // Stream errors are acceptable — the endpoint may not be supported
                 eprintln!("Stream error: {e}");
+                break;
+            }
+            None => {
+                // Stream ended (EOF) — nothing more coming
                 break;
             }
         }
@@ -739,10 +759,10 @@ async fn test_events_stream_live_consumption() {
     // We may get 0 events if the endpoint is not supported, or we may get events.
     // If we got events, verify their structure.
     if !events.is_empty() {
-        // Should have received at least 1 event (limit was 2)
+        // Should have received at least 2 events (the two uploads we triggered)
         assert!(
-            events.len() <= 2,
-            "Stream should respect limit, got {} events",
+            events.len() >= 2,
+            "Expected at least 2 events from the two uploads, got {}",
             events.len()
         );
 
