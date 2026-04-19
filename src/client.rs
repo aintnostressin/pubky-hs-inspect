@@ -8,6 +8,18 @@ use pubky::{Pkdns, PublicKey};
 use crate::commands::shared::{parse_sse_batch, SseEvent};
 use crate::error::Result;
 
+/// Stream result type — used for both `stream_sse_events` and `Client::stream_events_streamed`
+type StreamResult<T> = std::result::Result<T, pubky::Error>;
+
+/// Type alias for boxed SSE event streams
+type EventStream = futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>;
+
+/// Item type for the SSE event stream
+type SseStreamItem = std::result::Result<SseEvent, pubky::Error>;
+
+/// Pinned body stream yielding `Bytes` chunks
+type BodyStream = std::pin::Pin<Box<dyn futures::Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send>>;
+
 /// Client wrapper around the pubky SDK with PKRR resolution helpers.
 pub struct Client {
     pubky: Pubky,
@@ -339,10 +351,7 @@ impl Client {
         user: Option<&str>,
         limit: Option<u64>,
         reverse: bool,
-    ) -> std::result::Result<
-        futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>,
-        pubky::Error,
-    > {
+    ) -> StreamResult<EventStream> {
         // Build URL the same way as stream_events
         let base = url::Url::parse(base_url).map_err(|e| {
             pubky::Error::Request(pubky::errors::RequestError::Validation {
@@ -512,12 +521,7 @@ impl InputType {
 ///
 /// Reads from the server response line by line, parsing events as they arrive.
 /// Yields `SseEvent` immediately when an event block is complete (blank line or EOF).
-pub async fn stream_sse_events(
-    url: String,
-) -> std::result::Result<
-    futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>,
-    pubky::Error,
-> {
+pub async fn stream_sse_events(url: String) -> StreamResult<EventStream> {
     let resp = reqwest::get(&url).await.map_err(|e| {
         pubky::Error::Request(pubky::errors::RequestError::Validation {
             message: format!("Failed to stream events: {e}"),
@@ -529,25 +533,15 @@ pub async fn stream_sse_events(
 
 /// Async stream that parses SSE events from a bytes stream.
 struct SseEventStream {
-    /// The underlying bytes stream (boxed and pinned for !Unpin types)
     body: Option<BodyStream>,
-    /// Buffer for partial lines
     line_buf: String,
-    /// Current event being accumulated
     current_path: Option<String>,
     current_cursor: Option<u64>,
     current_hash: Option<String>,
 }
 
-/// Type alias for the pinned body stream yielding Bytes chunks
-type BodyStream =
-    std::pin::Pin<Box<dyn Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send>>;
-
 impl SseEventStream {
-    fn new<B>(body: B) -> Self
-    where
-        B: Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + 'static,
-    {
+    fn new(body: reqwest::stream::Stream) -> Self {
         Self {
             body: Some(Box::pin(body)),
             line_buf: String::new(),
@@ -557,52 +551,29 @@ impl SseEventStream {
         }
     }
 
-    /// Try to emit a complete event from accumulated state.
-    /// Returns the event if one is ready, otherwise None.
+    /// Try to build and consume a complete event. Returns `Some` when `path` and `cursor`
+    /// are both present. Uses `.take()` so state is cleared automatically.
     fn try_emit(&mut self) -> Option<SseEvent> {
-        if self.current_path.is_some() && self.current_cursor.is_some() {
-            Some(SseEvent {
-                path: self.current_path.take().unwrap(),
-                cursor: self.current_cursor.take().unwrap(),
-                content_hash: self.current_hash.take(),
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Reset event state after emitting (for new event accumulation)
-    fn reset_event(&mut self) {
-        self.current_path = None;
-        self.current_cursor = None;
-        self.current_hash = None;
+        self.current_path.take().zip(self.current_cursor.take()).map(|(path, cursor)| SseEvent {
+            path,
+            cursor,
+            content_hash: self.current_hash.take(),
+        })
     }
 }
 
 impl futures::Stream for SseEventStream {
-    type Item = std::result::Result<SseEvent, pubky::Error>;
+    type Item = SseStreamItem;
 
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
         loop {
-            // Check if we have a complete event to emit
-            if let Some(event) = self.try_emit() {
-                self.reset_event();
-                return std::task::Poll::Ready(Some(Ok(event)));
-            }
-
-            // Get the body stream
             let body = match &mut self.body {
                 Some(b) => b.as_mut(),
-                None => return std::task::Poll::Ready(None), // EOF already reached
+                None => return std::task::Poll::Ready(None),
             };
 
-            // Try to get next chunk from body
             match body.poll_next(cx) {
                 std::task::Poll::Ready(Some(Ok(bytes))) => {
-                    // Append to line buffer
                     self.line_buf.push_str(&String::from_utf8_lossy(&bytes));
 
                     // Process complete lines
@@ -610,23 +581,28 @@ impl futures::Stream for SseEventStream {
                         let line = self.line_buf[..pos].trim_end_matches('\r').to_string();
                         self.line_buf = self.line_buf[pos + 1..].to_string();
 
-                        if line.is_empty() {
-                            // Blank line = end of event block
-                            if let Some(event) = self.try_emit() {
-                                self.reset_event();
-                                return std::task::Poll::Ready(Some(Ok(event)));
+                        match line.as_str() {
+                            "" => {
+                                // Blank line = end of event block
+                                if let Some(event) = self.try_emit() {
+                                    return std::task::Poll::Ready(Some(Ok(event)));
+                                }
                             }
-                        } else if let Some(rest) = line.strip_prefix("path: ") {
-                            self.current_path = Some(rest.to_string());
-                        } else if let Some(rest) = line.strip_prefix("cursor: ") {
-                            if let Ok(cursor) = rest.trim().parse::<u64>() {
-                                self.current_cursor = Some(cursor);
+                            s if let Some(rest) = s.strip_prefix("path: ") => {
+                                self.current_path = Some(rest.to_string());
                             }
-                        } else if let Some(rest) = line.strip_prefix("content_hash: ") {
-                            self.current_hash = Some(rest.trim().to_string());
+                            s if let Some(rest) = s.strip_prefix("cursor: ") => {
+                                if let Ok(cursor) = rest.trim().parse::<u64>() {
+                                    self.current_cursor = Some(cursor);
+                                }
+                            }
+                            s if let Some(rest) = s.strip_prefix("content_hash: ") => {
+                                self.current_hash = Some(rest.trim().to_string());
+                            }
+                            _ => {} // Ignore unknown lines
                         }
                     }
-                    // If no newline found, partial line stays in buffer - loop to get more
+                    // Partial line stays in buffer — loop to fetch more
                 }
                 std::task::Poll::Ready(Some(Err(e))) => {
                     self.body = None;
@@ -637,18 +613,11 @@ impl futures::Stream for SseEventStream {
                     ))));
                 }
                 std::task::Poll::Ready(None) => {
-                    // EOF - emit any pending event and end stream
+                    // EOF — emit any pending event
                     self.body = None;
-                    if let Some(event) = self.try_emit() {
-                        self.reset_event();
-                        return std::task::Poll::Ready(Some(Ok(event)));
-                    }
-                    return std::task::Poll::Ready(None);
+                    return std::task::Poll::Ready(self.try_emit().map(Ok));
                 }
-                std::task::Poll::Pending => {
-                    // Need more data - yield to executor
-                    return std::task::Poll::Pending;
-                }
+                std::task::Poll::Pending => return std::task::Poll::Pending,
             }
         }
     }
