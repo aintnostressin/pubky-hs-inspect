@@ -16,3 +16,6 @@ serde_json = "1"
 colored = "3"
 url = "2"
 reqwest = { version = "0.12", features = ["json"] }
+
+[dev-dependencies]
+# pubky-testnet = "0.7"  # Disabled due to dependency conflicts with pubky-homeserver
