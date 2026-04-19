@@ -451,4 +451,42 @@ async fn test_events_integration() {
         result.is_ok(),
         "events command should succeed against testnet"
     );
+
+    // ── Verify get_events respects the reverse parameter ──
+
+    // Fetch events in forward order
+    let (events_fwd, _) = client
+        .get_events(&base_url, None, Some(20), Some(&hs_z32), false)
+        .await
+        .expect("get_events forward must succeed");
+
+    // Fetch events in reverse order
+    let (events_rev, _) = client
+        .get_events(&base_url, None, Some(20), Some(&hs_z32), true)
+        .await
+        .expect("get_events reverse must succeed");
+
+    // Both should return the same number of events
+    assert_eq!(
+        events_fwd.len(),
+        events_rev.len(),
+        "Forward and reverse queries should return the same number of events (got fwd={}, rev={})",
+        events_fwd.len(),
+        events_rev.len()
+    );
+
+    // If there are more than 1 event, the first and last should be different
+    // (i.e., the order is actually reversed, not identical)
+    if events_fwd.len() > 1 {
+        assert_ne!(
+            events_fwd.first(),
+            events_rev.first(),
+            "Reverse order should differ from forward order when there are multiple events"
+        );
+        assert_ne!(
+            events_fwd.last(),
+            events_rev.last(),
+            "Reverse order should differ from forward order when there are multiple events"
+        );
+    }
 }
