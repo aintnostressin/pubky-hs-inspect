@@ -256,7 +256,9 @@ async fn setup_testnet() -> TestContext {
 
 /// Helper to create a test user on the testnet.
 /// Returns (session, user_z32, homeserver_z32).
-async fn create_test_user(ctx: &TestContext) -> (pubky_testnet::pubky::PubkySession, String, String) {
+async fn create_test_user(
+    ctx: &TestContext,
+) -> (pubky_testnet::pubky::PubkySession, String, String) {
     let keypair = ctx.pubky.signer(pubky_testnet::pubky::Keypair::random());
 
     let session = keypair
@@ -282,7 +284,10 @@ async fn test_inspect_homeserver_integration() {
     // Run the inspect command
     let cli = Cli::parse_from(["pubky-hs-inspect", "inspect", &hs_z32]);
     let result = commands::run(&cli).await;
-    assert!(result.is_ok(), "inspect command should succeed against testnet");
+    assert!(
+        result.is_ok(),
+        "inspect command should succeed against testnet"
+    );
 }
 
 /// Test inspect-user against a local testnet.
@@ -327,7 +332,10 @@ async fn test_storage_listing_integration() {
     // Run the storage command
     let cli = Cli::parse_from(["pubky-hs-inspect", "storage", &user_z32]);
     let result = commands::run(&cli).await;
-    assert!(result.is_ok(), "storage command should succeed against testnet");
+    assert!(
+        result.is_ok(),
+        "storage command should succeed against testnet"
+    );
 
     // Clean up
     drop(session);
@@ -418,7 +426,10 @@ async fn test_events_integration() {
     // Run the events command
     let cli = Cli::parse_from(["pubky-hs-inspect", "events", &hs_z32]);
     let result = commands::run(&cli).await;
-    assert!(result.is_ok(), "events command should succeed against testnet");
+    assert!(
+        result.is_ok(),
+        "events command should succeed against testnet"
+    );
 
     // Clean up
     drop(session);
