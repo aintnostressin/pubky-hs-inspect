@@ -339,7 +339,7 @@ impl Client {
         user: Option<&str>,
         limit: Option<u64>,
         reverse: bool,
-    ) -> Result<futures::stream::BoxStream<'static, Result<SseEvent, pubky::Error>>> {
+    ) -> std::result::Result<futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>, crate::error::Error> {
         // Build URL the same way as stream_events
         let base = url::Url::parse(base_url).map_err(|e| {
             pubky::Error::Request(pubky::errors::RequestError::Validation {
@@ -511,7 +511,7 @@ impl InputType {
 /// Yields `SseEvent` immediately when an event block is complete (blank line or EOF).
 pub async fn stream_sse_events(
     url: String,
-) -> Result<futures::stream::BoxStream<'static, Result<SseEvent, pubky::Error>>> {
+) -> std::result::Result<futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>, crate::error::Error> {
     let resp = reqwest::get(&url).await.map_err(|e| {
         pubky::Error::Request(pubky::errors::RequestError::Validation {
             message: format!("Failed to stream events: {e}"),
@@ -534,12 +534,12 @@ struct SseEventStream {
 }
 
 /// Type alias for the pinned body stream yielding Bytes chunks
-type BodyStream = std::pin::Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+type BodyStream = std::pin::Pin<Box<dyn Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send>>;
 
 impl SseEventStream {
     fn new<B>(body: B) -> Self
     where
-        B: Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+        B: Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + 'static,
     {
         Self {
             body: Some(Box::pin(body)),
@@ -573,7 +573,7 @@ impl SseEventStream {
 }
 
 impl futures::Stream for SseEventStream {
-    type Item = Result<SseEvent, pubky::Error>;
+    type Item = std::result::Result<SseEvent, pubky::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
