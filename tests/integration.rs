@@ -114,9 +114,10 @@ fn test_parse_ls_command_custom_path() {
 fn test_parse_events_command() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "events", "-l", "10", "events123key"]);
     match cli.command {
-        Some(Commands::Events { homeserver, limit }) => {
+        Some(Commands::Events { homeserver, limit, rev }) => {
             assert_eq!(homeserver, Some("events123key".to_string()));
             assert_eq!(limit, Some(10));
+            assert!(!rev);
         }
         _ => panic!("expected Events command"),
     }
@@ -419,7 +420,7 @@ async fn test_events_integration() {
 
     // Call get_events and verify the response.
     let (events, _next_cursor) = client
-        .get_events(&base_url, None, Some(10), Some(&hs_z32))
+        .get_events(&base_url, None, Some(10), Some(&hs_z32), false)
         .await
         .expect("get_events must succeed — homeserver returned an error");
 
