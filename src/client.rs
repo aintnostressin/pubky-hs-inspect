@@ -181,6 +181,17 @@ impl Client {
         let base = self.homeserver_url(info);
         format!("{base}{path}")
     }
+
+    /// Fetch the homeserver profile/metadata JSON from a known z32 address.
+    pub async fn get_homeserver_profile(&self, z32: &str) -> Option<serde_json::Value> {
+        let profile_url = format!("https://_pubky.{z32}/pub/pubky.app/profile.json");
+        if let Ok(profile) = self.get_json::<serde_json::Value>(&profile_url).await {
+            return Some(profile);
+        }
+        // Also try with pubky:// scheme
+        let alt_url = format!("pubky://{z32}/pub/pubky.app/profile.json");
+        self.get_json::<serde_json::Value>(&alt_url).await.ok()
+    }
 }
 
 /// Information about a homeserver resolved from a PKRR record.

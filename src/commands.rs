@@ -8,6 +8,7 @@ use crate::error::Result;
 pub async fn run(cli: &Cli) -> Result<()> {
     match &cli.command {
         Some(Commands::Inspect { url }) => cmd_inspect(url).await,
+        Some(Commands::InspectUser { url }) => cmd_inspect_user(url).await,
         Some(Commands::Pkdns { url }) => cmd_pkdns(url).await,
         Some(Commands::Storage { url }) => cmd_storage(url).await,
         Some(Commands::Version) => cmd_version(),
@@ -28,10 +29,99 @@ pub async fn run(cli: &Cli) -> Result<()> {
     }
 }
 
-// ── inspect ────────────────────────────────────────────────────────
+// ── inspect (homeserver) ─────────────────────────────────────────
 
-/// Inspect a PKRR public key — resolve homeserver, show endpoints.
+/// Inspect a homeserver — resolve its PKRR, show metadata and user count.
 async fn cmd_inspect(input: &str) -> Result<()> {
+    let client = Client::new()?;
+    println!("{}", "═══ Homeserver Inspection ═══".bold().cyan());
+    println!();
+
+    let parsed = parse_input(input);
+
+    match &parsed {
+        InputType::PublicKey(key_str) => {
+            let pk = match pubky::PublicKey::try_from(key_str.as_str()) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    println!("   Error parsing public key: {e}");
+                    return Ok(());
+                }
+            };
+            let z32 = pk.z32();
+
+            // Identity
+            println!("{}", "▸ Homeserver Identity".bold());
+            println!("   Input:  {key_str}");
+            println!("   Z32:    {z32}");
+            println!();
+
+            // PKRR resolution for the homeserver itself
+            println!("{}", "▸ PKRR Record".bold());
+            match client.resolve_pkrr_endpoint(&z32).await {
+                Some(target) => {
+                    let is_domain = target.contains('.');
+                    println!("   Target:    {target}");
+                    if is_domain {
+                        println!("   Type:      ICANN domain");
+                    } else {
+                        println!("   Type:      pubkey-as-host");
+                    }
+                    println!("   Status:    {}", "resolved ✓".green());
+                }
+                None => {
+                    println!("   {}", "no PKRR record found".yellow());
+                    println!("   Status:  {}", "unresolvable ✗".red());
+                }
+            }
+            println!();
+
+            // Try to get profile / user count
+            println!("{}", "▸ Metadata".bold());
+            let base_url = format!("https://_pubky.{z32}/pub/pubky.app/profile.json");
+            match client.get_homeserver_profile(&z32).await {
+                Some(profile) => {
+                    println!("   Profile URL: {base_url}");
+                    if let Some(count) = profile.get("users").and_then(|v| v.as_u64()) {
+                        println!("   Users:       {count}");
+                    } else if let Some(count) = profile.get("user_count").and_then(|v| v.as_u64()) {
+                        println!("   Users:       {count}");
+                    } else if let Some(reg) = profile.get("registrations") {
+                        println!("   Registrations: {reg}");
+                    } else {
+                        println!("   Profile:     {}", "found (no user count field)".yellow());
+                        if let Some(name) = profile.get("name").and_then(|v| v.as_str()) {
+                            println!("   Name:        {name}");
+                        }
+                        if let Some(desc) = profile.get("description").and_then(|v| v.as_str()) {
+                            let truncated: String = desc.chars().take(80).collect();
+                            println!("   Description: {truncated}");
+                        }
+                    }
+                    println!("   Status:      {}", "profile fetched ✓".green());
+                }
+                None => {
+                    println!("   Profile URL: {base_url}");
+                    println!("   {}", "profile not available".yellow());
+                    println!("   Status:      {}", "no profile found".red());
+                }
+            }
+        }
+        InputType::Url(url_str) => {
+            println!("   Target: {url_str}");
+            println!();
+            println!("   Note: Input appears to be a URL. For homeserver inspection,");
+            println!("   please provide a z32 public key directly.");
+        }
+    }
+
+    Ok(())
+}
+
+// ── inspect-user ───────────────────────────────────────────────────
+
+/// Inspect a Pubky user — resolve their homeserver, show storage and endpoints.
+async fn cmd_inspect_user(input: &str) -> Result<()> {
     let client = Client::new()?;
     println!("{}", "═══ PKRR Homeserver Inspection ═══".bold().cyan());
     println!();

@@ -16,9 +16,16 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Inspect a PKRR public key — resolve homeserver, show endpoints
+    /// Inspect a homeserver — resolve its PKRR, show metadata and user count
     Inspect {
-        /// PKRR public key (z32) or pubky:// URL
+        /// Homeserver public key (z32), domain, or pubky:// URL
+        #[arg(value_name = "HOMESERVER")]
+        url: String,
+    },
+
+    /// Inspect a Pubky user — resolve their homeserver, show storage and endpoints
+    InspectUser {
+        /// PKRR public key (z32) or pubky:// URL of a user
         #[arg(value_name = "KEY_OR_URL")]
         url: String,
     },
