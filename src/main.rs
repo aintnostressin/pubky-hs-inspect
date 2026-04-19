@@ -1,17 +1,10 @@
-#![allow(dead_code)]
-
-mod cli;
-mod client;
-mod commands;
-mod error;
-
 use clap::Parser;
 
-use cli::Cli;
-use error::Result;
+use pubky_hs_inspect::cli::Cli;
+use pubky_hs_inspect::error::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    commands::run(&cli).await
+    pubky_hs_inspect::commands::run(&cli).await
 }

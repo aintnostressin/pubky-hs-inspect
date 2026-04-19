@@ -129,7 +129,7 @@ async fn cmd_inspect(input: &str) -> Result<()> {
 /// Inspect a Pubky user — resolve their homeserver, show storage and endpoints.
 async fn cmd_inspect_user(input: &str) -> Result<()> {
     let client = Client::new()?;
-    println!("{}", "═══ PKRR Homeserver Inspection ═══".bold().cyan());
+    println!("{}", "═══ User Inspection ═══".bold().cyan());
     println!();
 
     let parsed = parse_input(input);
