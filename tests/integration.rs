@@ -225,15 +225,201 @@ async fn test_events_without_homeserver() {
 // These tests use pubky-testnet::EphemeralTestnet to spin up a local
 // DHT + homeserver + relay for fully offline testing.
 //
-// To run these tests:
-// 1. Uncomment pubky-testnet in Cargo.toml dev-dependencies
-// 2. Ensure the dependency compiles (may require fixing upstream issues)
-// 3. Run: cargo test --test integration -- --ignored
+// To run these tests: cargo test --test integration -- --ignored
 //
-// Note: These tests are currently disabled due to pubky-testnet
-// compilation issues with simple-dns 0.11.2.
+// Note: These tests spin up a full local testnet with DHT, homeserver,
+// relay, and PostgreSQL. Expect ~30-60 seconds per test.
 
-// TODO: Uncomment when pubky-testnet dependency is fixed
-// #[tokio::test]
-// #[ignore = "requires working pubky-testnet dependency"]
-// async fn test_inspect_homeserver_integration() { ... }
+/// Wrapper that keeps a testnet alive for the duration of a test.
+struct TestContext {
+    _testnet: pubky_testnet::EphemeralTestnet,
+    pubky: pubky_testnet::pubky::Pubky,
+    homeserver_pub_key: pubky_testnet::pubky::PublicKey,
+}
+
+/// Helper to build an ephemeral testnet with a homeserver and HTTP relay.
+async fn setup_testnet() -> TestContext {
+    let testnet = pubky_testnet::EphemeralTestnet::builder()
+        .with_http_relay()
+        .config(pubky_testnet::pubky_homeserver::ConfigToml::default_test_config())
+        .build()
+        .await
+        .unwrap();
+    let pubky = testnet.sdk().unwrap();
+    let homeserver_pub_key = testnet.homeserver_app().public_key();
+    TestContext {
+        _testnet: testnet,
+        pubky,
+        homeserver_pub_key,
+    }
+}
+
+/// Helper to create a test user on the testnet.
+/// Returns (session, user_z32, homeserver_z32).
+async fn create_test_user(ctx: &TestContext) -> (pubky_testnet::pubky::PubkySession, String, String) {
+    let keypair = ctx.pubky.signer(pubky_testnet::pubky::Keypair::random());
+
+    let session = keypair
+        .signup(&ctx.homeserver_pub_key, None)
+        .await
+        .expect("user signup should succeed");
+
+    let user_z32 = session.info().public_key().z32();
+    let hs_z32 = ctx.homeserver_pub_key.z32();
+
+    (session, user_z32, hs_z32)
+}
+
+/// Test inspect homeserver against a local testnet.
+/// Verifies that the inspect command correctly resolves and displays
+/// homeserver information from a real local homeserver.
+#[tokio::test]
+#[ignore = "spins up ephemeral testnet (slow)"]
+async fn test_inspect_homeserver_integration() {
+    let ctx = setup_testnet().await;
+    let hs_z32 = ctx.homeserver_pub_key.z32();
+
+    // Run the inspect command
+    let cli = Cli::parse_from(["pubky-hs-inspect", "inspect", &hs_z32]);
+    let result = commands::run(&cli).await;
+    assert!(result.is_ok(), "inspect command should succeed against testnet");
+}
+
+/// Test inspect-user against a local testnet.
+/// Verifies that the inspect-user command correctly resolves a user's
+/// homeserver and displays storage information.
+#[tokio::test]
+#[ignore = "spins up ephemeral testnet (slow)"]
+async fn test_inspect_user_integration() {
+    let ctx = setup_testnet().await;
+    let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
+
+    // Run the inspect-user command
+    let cli = Cli::parse_from(["pubky-hs-inspect", "inspect-user", &user_z32]);
+    let result = commands::run(&cli).await;
+    assert!(
+        result.is_ok(),
+        "inspect-user command should succeed against testnet"
+    );
+
+    // Clean up
+    drop(session);
+}
+
+/// Test storage listing against a local testnet.
+/// Verifies that the storage command correctly lists public storage entries
+/// for a user who has uploaded files.
+#[tokio::test]
+#[ignore = "spins up ephemeral testnet (slow)"]
+async fn test_storage_listing_integration() {
+    let ctx = setup_testnet().await;
+    let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
+
+    // Upload a test file to public storage
+    session
+        .storage()
+        .put("/pub/test-file.txt", "hello world")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+
+    // Run the storage command
+    let cli = Cli::parse_from(["pubky-hs-inspect", "storage", &user_z32]);
+    let result = commands::run(&cli).await;
+    assert!(result.is_ok(), "storage command should succeed against testnet");
+
+    // Clean up
+    drop(session);
+}
+
+/// Test ls listing against a local testnet.
+/// Verifies that the ls command correctly lists files in a user's storage
+/// directory structure.
+#[tokio::test]
+#[ignore = "spins up ephemeral testnet (slow)"]
+async fn test_ls_listing_integration() {
+    let ctx = setup_testnet().await;
+    let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
+
+    // Upload multiple test files in a directory structure
+    session
+        .storage()
+        .put("/pub/my-app/hello.txt", "hi")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+    session
+        .storage()
+        .put("/pub/my-app/config.json", r#"{"key":"value"}"#)
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+    session
+        .storage()
+        .put("/pub/my-app/assets/style.css", "body{}")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+
+    // Run the ls command with default path
+    let cli = Cli::parse_from(["pubky-hs-inspect", "ls", &user_z32]);
+    let result = commands::run(&cli).await;
+    assert!(result.is_ok(), "ls command should succeed against testnet");
+
+    // Run the ls command with specific path
+    let cli = Cli::parse_from([
+        "pubky-hs-inspect",
+        "ls",
+        &user_z32,
+        "--path",
+        "/pub/my-app/",
+    ]);
+    let result = commands::run(&cli).await;
+    assert!(
+        result.is_ok(),
+        "ls command with path should succeed against testnet"
+    );
+
+    // Clean up
+    drop(session);
+}
+
+/// Test events against a local testnet.
+/// Verifies that the events command correctly fetches and displays
+/// file change events from a homeserver.
+#[tokio::test]
+#[ignore = "spins up ephemeral testnet (slow)"]
+async fn test_events_integration() {
+    let ctx = setup_testnet().await;
+    let (session, _user_z32, _hs_z32) = create_test_user(&ctx).await;
+
+    // Upload files to trigger events
+    session
+        .storage()
+        .put("/pub/doc1.txt", "content1")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+    session
+        .storage()
+        .put("/pub/doc2.txt", "content2")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+
+    let hs_z32 = ctx.homeserver_pub_key.z32();
+
+    // Run the events command
+    let cli = Cli::parse_from(["pubky-hs-inspect", "events", &hs_z32]);
+    let result = commands::run(&cli).await;
+    assert!(result.is_ok(), "events command should succeed against testnet");
+
+    // Clean up
+    drop(session);
+}
