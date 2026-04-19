@@ -64,6 +64,7 @@ pub async fn resolve_homeserver_url(
 }
 
 /// State for accumulating a single SSE event during parsing.
+#[derive(Default)]
 pub struct SseEventAccumulator {
     path: Option<String>,
     cursor: Option<u64>,
@@ -72,13 +73,11 @@ pub struct SseEventAccumulator {
 
 impl SseEventAccumulator {
     pub fn new() -> Self {
-        Self {
-            path: None,
-            cursor: None,
-            hash: None,
-        }
+        Self::default()
     }
+}
 
+impl SseEventAccumulator {
     /// Process a single SSE line. Returns true if the line was blank (event boundary).
     pub fn process_line(&mut self, line: &str) -> bool {
         if line.is_empty() {
@@ -98,11 +97,14 @@ impl SseEventAccumulator {
 
     /// Try to build a complete event from accumulated state. Returns `Some` when ready.
     pub fn try_emit(&mut self) -> Option<SseEvent> {
-        self.path.take().zip(self.cursor.take()).map(|(path, cursor)| SseEvent {
-            path,
-            cursor,
-            content_hash: self.hash.take(),
-        })
+        self.path
+            .take()
+            .zip(self.cursor.take())
+            .map(|(path, cursor)| SseEvent {
+                path,
+                cursor,
+                content_hash: self.hash.take(),
+            })
     }
 }
 
@@ -175,7 +177,9 @@ pub struct SseEventStream {
 impl SseEventStream {
     pub fn new<B>(body: B) -> Self
     where
-        B: futures::Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
+        B: futures::Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>>
+            + Send
+            + 'static,
     {
         Self {
             body: Box::pin(body),
