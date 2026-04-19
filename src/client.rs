@@ -207,16 +207,30 @@ impl Client {
     ///
     /// Returns a tuple of (event lines, next_cursor).
     /// Each event line is in the format: "PUT pubky://user/path" or "DEL pubky://user/path"
+    ///
+    /// * `base_url` — the homeserver base URL (e.g. `https://_pubky.<z32>`).
+    /// * `cursor` — optional cursor for pagination (received from a previous response).
+    /// * `limit` — maximum number of events to fetch.
+    /// * `pubky_host` — optional homeserver z32 key to include as `pubky-host` query param
+    ///   (needed when the base URL doesn't encode a hostname, e.g. `http://127.0.0.1:<port>`).
     pub async fn get_events(
         &self,
         base_url: &str,
+        cursor: Option<&str>,
         limit: Option<u64>,
+        pubky_host: Option<&str>,
     ) -> Result<(Vec<String>, Option<String>)> {
-        let mut url = format!("{base_url}/_matrix/client/v3/events/");
+        let mut url = format!("{base_url}/events/");
         let mut query_parts = Vec::new();
 
+        if let Some(c) = cursor {
+            query_parts.push(format!("cursor={c}"));
+        }
         if let Some(l) = limit {
             query_parts.push(format!("limit={}", l));
+        }
+        if let Some(pk) = pubky_host {
+            query_parts.push(format!("pubky-host={pk}"));
         }
 
         if !query_parts.is_empty() {

@@ -8,6 +8,7 @@ use clap::Parser;
 
 // Import the CLI and commands from the library
 use pubky_hs_inspect::cli::{Cli, Commands};
+use pubky_hs_inspect::client::Client;
 use pubky_hs_inspect::commands;
 
 // ── Test: version command ──────────────────────────────────────────
@@ -230,7 +231,7 @@ async fn test_events_without_homeserver() {
 
 /// Wrapper that keeps a testnet alive for the duration of a test.
 struct TestContext {
-    _testnet: pubky_testnet::EphemeralTestnet,
+    testnet: pubky_testnet::EphemeralTestnet,
     pubky: pubky_testnet::pubky::Pubky,
     homeserver_pub_key: pubky_testnet::pubky::PublicKey,
 }
@@ -247,7 +248,7 @@ async fn setup_testnet() -> TestContext {
     let pubky = testnet.sdk().unwrap();
     let homeserver_pub_key = testnet.homeserver_app().public_key();
     TestContext {
-        _testnet: testnet,
+        testnet,
         pubky,
         homeserver_pub_key,
     }
@@ -385,7 +386,8 @@ async fn test_ls_listing_integration() {
 
 /// Test events against a local testnet.
 /// Verifies that the events command correctly fetches and displays
-/// file change events from a homeserver.
+/// file change events from a homeserver, and that the URL uses the
+/// correct Pubky `/events/` path (not Matrix `/_matrix/client/v3/events/`).
 #[tokio::test]
 
 async fn test_events_integration() {
@@ -410,7 +412,51 @@ async fn test_events_integration() {
 
     let hs_z32 = ctx.homeserver_pub_key.z32();
 
-    // Run the events command
+    // ── Verify get_events returns valid events from the homeserver ──
+
+    // Get the homeserver's local HTTP URL (http://127.0.0.1:<port>)
+    let base_url = ctx.testnet.homeserver_app().icann_http_url().to_string();
+    let client = Client::new().unwrap();
+
+    // Call get_events and verify the response.
+    // NOTE: This test will fail until the homeserver fixes a routing bug
+    // where /events/ is intercepted by the tenants router's catch-all
+    // /{*path} route, which applies the AuthorizationLayer that rejects
+    // non-/pub/ paths. The fix is to define /events/ after the merge.
+    let (events, _next_cursor) = client
+        .get_events(&base_url, None, Some(10), Some(&hs_z32))
+        .await
+        .expect("get_events must succeed — homeserver returned an error");
+
+    // Events must not be empty
+    assert!(
+        !events.is_empty(),
+        "Expected events from homeserver, got empty list"
+    );
+
+    let events_text: String = events.join("\n");
+
+    // Must contain valid event entries (PUT or DEL)
+    assert!(
+        events_text.contains("PUT") || events_text.contains("DEL"),
+        "Events must contain PUT/DEL entries, got: {events_text}"
+    );
+
+    // Must NOT contain Matrix API path — proves we hit /events/ not Matrix
+    assert!(
+        !events_text.contains("_matrix/client/v3"),
+        "Response must not contain Matrix path: {events_text}"
+    );
+
+    // Must NOT contain authz errors — proves the endpoint isn't intercepted
+    assert!(
+        !events_text.contains("is forbidden"),
+        "Response must not contain 'forbidden' error: {events_text}"
+    );
+
+    // ── CLI integration test ──
+
+    // Run the events command to verify end-to-end routing works
     let cli = Cli::parse_from(["pubky-hs-inspect", "events", &hs_z32]);
     let result = commands::run(&cli).await;
     assert!(
