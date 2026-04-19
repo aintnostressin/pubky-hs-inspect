@@ -542,7 +542,10 @@ struct SseEventStream {
 }
 
 impl SseEventStream {
-    fn new(body: reqwest::stream::Stream) -> Self {
+    fn new<B>(body: B) -> Self
+    where
+        B: futures::Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + 'static,
+    {
         Self {
             body: Box::pin(body),
             eof: false,
@@ -565,24 +568,23 @@ impl SseEventStream {
 
     /// Parse a single SSE line. Returns a completed event if the line was blank (event boundary).
     fn process_line(&mut self, line: &str) -> Option<SseEvent> {
-        match line {
-            "" => self.try_emit(), // Blank line signals end of event
-            s if let Some(rest) = s.strip_prefix("path: ") => {
-                self.current_path = Some(rest.to_string());
-                None
-            }
-            s if let Some(rest) = s.strip_prefix("cursor: ") => {
-                if let Ok(cursor) = rest.trim().parse::<u64>() {
-                    self.current_cursor = Some(cursor);
-                }
-                None
-            }
-            s if let Some(rest) = s.strip_prefix("content_hash: ") => {
-                self.current_hash = Some(rest.to_string());
-                None
-            }
-            _ => None, // Ignore unknown lines
+        // Blank line signals end of event
+        if line.is_empty() {
+            return self.try_emit();
         }
+
+        // Match on prefix manually (avoids experimental if-let guards)
+        if let Some(rest) = line.strip_prefix("path: ") {
+            self.current_path = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("cursor: ") {
+            if let Ok(cursor) = rest.trim().parse::<u64>() {
+                self.current_cursor = Some(cursor);
+            }
+        } else if let Some(rest) = line.strip_prefix("content_hash: ") {
+            self.current_hash = Some(rest.to_string());
+        }
+
+        None
     }
 }
 
@@ -596,8 +598,8 @@ impl futures::Stream for SseEventStream {
                 return std::task::Poll::Ready(self.try_emit().map(Ok));
             }
 
-            let body = &mut self.body;
-            match futures::poll!(body.poll_next(cx)) {
+            // Poll the body stream directly
+            match self.body.as_mut().poll_next(cx) {
                 std::task::Poll::Ready(Some(Ok(bytes))) => {
                     self.line_buf.push_str(&String::from_utf8_lossy(&bytes));
 
