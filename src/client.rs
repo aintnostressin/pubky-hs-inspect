@@ -1,9 +1,10 @@
+use futures::Stream;
 use pkarr::dns::rdata::RData;
 use pkarr::SignedPacket;
 use pubky::Pubky;
 use pubky::{Pkdns, PublicKey};
 
-use crate::commands::shared::parse_sse_batch;
+use crate::commands::shared::{parse_sse_batch, SseEvent};
 use crate::error::Result;
 
 /// Client wrapper around the pubky SDK with PKRR resolution helpers.
@@ -321,6 +322,47 @@ impl Client {
         // Parse SSE format: key: value pairs separated by blank lines
         Ok(parse_sse_batch(&text))
     }
+
+    /// Stream SSE events from a homeserver's `/events-stream/` endpoint in real time.
+    ///
+    /// Returns an async stream that yields `SseEvent` as they arrive from the server.
+    /// Events are printed immediately as they arrive (real-time streaming).
+    ///
+    /// * `base_url` — the homeserver base URL
+    /// * `user` — optional user public key filter (z32)
+    /// * `limit` — max events to stream before stopping (None = infinite)
+    /// * `reverse` — reverse ordering (newest first)
+    pub async fn stream_events_streamed(
+        &self,
+        base_url: &str,
+        user: Option<&str>,
+        limit: Option<u64>,
+        reverse: bool,
+    ) -> Result<futures::stream::BoxStream<'static, Result<SseEvent, pubky::Error>>> {
+        // Build URL the same way as stream_events
+        let base = url::Url::parse(base_url).map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Invalid base URL '{base_url}': {e}"),
+            })
+        })?;
+        let mut url = base.join("/events-stream/").map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to join path: {e}"),
+            })
+        })?;
+        // Add query params using Url::query_pairs_mut for proper encoding
+        if let Some(u) = user {
+            url.query_pairs_mut().append_pair("user", u);
+        }
+        if let Some(l) = limit {
+            url.query_pairs_mut().append_pair("limit", &l.to_string());
+        }
+        if reverse {
+            url.query_pairs_mut().append_pair("reverse", "true");
+        }
+
+        stream_sse_events(url.to_string()).await
+    }
 }
 
 /// Information about a homeserver resolved from a PKRR record.
@@ -460,6 +502,97 @@ impl InputType {
     pub fn is_url(&self) -> bool {
         matches!(self, InputType::Url(_))
     }
+}
+
+/// An async stream of SSE events from the `/events-stream/` endpoint.
+///
+/// Reads from the server response line by line, parsing events as they arrive.
+/// Yields `SseEvent` immediately when an event block is complete (blank line or EOF).
+pub async fn stream_sse_events(
+    url: String,
+) -> Result<futures::stream::BoxStream<'static, Result<SseEvent, pubky::Error>>> {
+    let resp = reqwest::get(&url).await.map_err(|e| {
+        pubky::Error::Request(pubky::errors::RequestError::Validation {
+            message: format!("Failed to stream events: {e}"),
+        })
+    })?;
+    let mut body = resp.bytes_stream();
+
+    let stream = futures::stream::unfold(
+        (body, String::new(), None::<String>, None::<u64>, None::<String>),
+        |(mut body, mut line_buf, mut current_path, mut current_cursor, mut current_hash)| async move {
+            loop {
+                // Read next chunk from the response body
+                let chunk = match body.next().await {
+                    Some(Ok(bytes)) => bytes,
+                    Some(Err(e)) => {
+                        return Some((
+                            Err(pubky::Error::Request(
+                                pubky::errors::RequestError::Validation {
+                                    message: format!("Stream error: {e}"),
+                                },
+                            )),
+                            (body, line_buf, current_path, current_cursor, current_hash),
+                        ));
+                    }
+                    None => {
+                        // EOF — emit any pending event
+                        if let (Some(path), Some(cursor)) =
+                            (current_path.take(), current_cursor.take())
+                        {
+                            return Some((
+                                Ok(SseEvent {
+                                    path,
+                                    cursor,
+                                    content_hash: current_hash.take(),
+                                }),
+                                (body, line_buf, None, None, None),
+                            ));
+                        }
+                        return None;
+                    }
+                };
+
+                // Append chunk to line buffer
+                line_buf.push_str(&String::from_utf8_lossy(&chunk));
+
+                // Process complete lines
+                while let Some(pos) = line_buf.find('\n') {
+                    let line = line_buf[..pos].trim_end_matches('\r').to_string();
+                    line_buf = line_buf[pos + 1..].to_string();
+
+                    if line.is_empty() {
+                        // Blank line = end of event block
+                        if let (Some(path), Some(cursor)) =
+                            (current_path.take(), current_cursor.take())
+                        {
+                            return Some((
+                                Ok(SseEvent {
+                                    path,
+                                    cursor,
+                                    content_hash: current_hash.take(),
+                                }),
+                                (body, line_buf, None, None, None),
+                            ));
+                        }
+                        // Empty event block (consecutive blank lines) — skip
+                    } else if let Some(rest) = line.strip_prefix("path: ") {
+                        current_path = Some(rest.to_string());
+                    } else if let Some(rest) = line.strip_prefix("cursor: ") {
+                        if let Ok(cursor) = rest.trim().parse::<u64>() {
+                            current_cursor = Some(cursor);
+                        }
+                    } else if let Some(rest) = line.strip_prefix("content_hash: ") {
+                        current_hash = Some(rest.trim().to_string());
+                    }
+                }
+                // Partial line remains in line_buf — loop again to read more
+            }
+        },
+    )
+    .boxed();
+
+    Ok(stream)
 }
 
 #[cfg(test)]

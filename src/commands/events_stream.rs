@@ -1,4 +1,5 @@
 use colored::Colorize;
+use futures::StreamExt;
 
 use crate::client::Client;
 use crate::commands::shared::{print_sse_event, resolve_homeserver_url};
@@ -47,28 +48,39 @@ pub async fn cmd_events_stream(
         println!("  Limit: {l}");
     }
     println!("  Reverse: {reverse}");
+    println!("  Mode: {}", if live { "live" } else { "batch" });
     println!();
 
-    // Stream events
-    let events = match client.stream_events(&base_url, user, limit, reverse).await {
-        Ok(events) => events,
-        Err(e) => {
-            eprintln!("Error streaming events: {e}");
-            return Ok(());
-        }
-    };
+    // Stream events in real-time
+    let mut stream = client
+        .stream_events_streamed(&base_url, user, limit, reverse)
+        .await?;
 
-    if events.is_empty() {
-        println!("  {}", "no events found".yellow());
-    } else {
-        println!("  Total events: {}", events.len());
-        println!();
-        for event in &events {
-            print_sse_event(event);
-        }
-        if let Some(last) = events.last() {
-            println!();
-            println!("  Last cursor: {}", last.cursor);
+    let mut count = 0u64;
+    loop {
+        match stream.next().await {
+            Some(Ok(event)) => {
+                print_sse_event(&event);
+                count += 1;
+                if !live && count >= limit.unwrap_or(u64::MAX) {
+                    break;
+                }
+            }
+            Some(Err(e)) => {
+                eprintln!("Error receiving event: {e}");
+                break;
+            }
+            None => {
+                // Stream ended (EOF)
+                if !live {
+                    println!();
+                    println!(
+                        "  {} events received.",
+                        count.to_string().green().bold()
+                    );
+                }
+                break;
+            }
         }
     }
 
