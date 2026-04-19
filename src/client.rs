@@ -222,7 +222,7 @@ impl Client {
     ) -> Result<(Vec<String>, Option<String>)> {
         // Parse base_url as Url, join with /events/ to avoid double slashes,
         // then append query params.
-        let base = url::Url::parse(&base_url).map_err(|e| {
+        let base = url::Url::parse(base_url).map_err(|e| {
             pubky::Error::Request(pubky::errors::RequestError::Validation {
                 message: format!("Invalid base URL '{base_url}': {e}"),
             })
