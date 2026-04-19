@@ -154,6 +154,21 @@ impl Client {
         Ok(paths)
     }
 
+    /// Format a flat listing of pubky URLs as a table with file/directory indicators.
+    pub fn format_list(&self, entries: &[String]) -> Vec<String> {
+        let mut lines = Vec::new();
+        for entry_url in entries {
+            // Check if entry is a directory (ends with '/')
+            let is_dir = entry_url.ends_with('/');
+            let icon = if is_dir { "📁" } else { "📄" };
+            // Strip pubky:// scheme and leading slash to get relative name
+            let name = entry_url.strip_prefix("pubky://").unwrap_or(entry_url);
+            let name = name.strip_prefix('/').unwrap_or(name);
+            lines.push(format!("   {icon} {name}"));
+        }
+        lines
+    }
+
     // ── Helpers ──────────────────────────────────────────────────
 
     /// Build a transport URL for a resource on a given user's space.
