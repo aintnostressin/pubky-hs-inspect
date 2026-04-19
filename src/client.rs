@@ -1,4 +1,5 @@
-use futures::Stream;
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use pkarr::dns::rdata::RData;
 use pkarr::SignedPacket;
 use pubky::Pubky;
@@ -532,11 +533,14 @@ struct SseEventStream {
     current_hash: Option<String>,
 }
 
-/// Type alias for the pinned body stream
-type BodyStream = std::pin::Pin<Box<dyn futures::Stream<Item = Result<reqwest::Bytes, reqwest::Error>> + Send>>;
+/// Type alias for the pinned body stream yielding Bytes chunks
+type BodyStream = std::pin::Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
 impl SseEventStream {
-    fn new(body: reqwest::stream::Stream) -> Self {
+    fn new<B>(body: B) -> Self
+    where
+        B: Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    {
         Self {
             body: Some(Box::pin(body)),
             line_buf: String::new(),
