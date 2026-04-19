@@ -248,6 +248,8 @@ impl Client {
             url.query_pairs_mut().append_pair("reverse", "true");
         }
 
+        eprintln!("DEBUG: events URL = {url}");
+
         let resp = reqwest::get(url.to_string()).await.map_err(|e| {
             pubky::Error::Request(pubky::errors::RequestError::Validation {
                 message: format!("Failed to fetch events: {e}"),
