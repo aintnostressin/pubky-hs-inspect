@@ -44,6 +44,17 @@ pub enum Commands {
         url: String,
     },
 
+    /// List files under a path for a user's storage
+    Ls {
+        /// PKRR public key (z32) or pubky:// URL of a user
+        #[arg(value_name = "KEY_OR_URL")]
+        url: String,
+
+        /// Path within storage (default: /pub/)
+        #[arg(short, long, default_value = "/pub/")]
+        path: String,
+    },
+
     /// Show tool version
     Version,
 }

@@ -9,6 +9,7 @@ Resolve PKRR records, query homeserver endpoints, and browse public storage — 
 - **Resolve PKRR records** — look up `_pubky` SVCB/HTTPS DNS records for any public key
 - **Inspect homeservers** — discover the homeserver domain or pubkey-as-host for a user
 - **Browse public storage** — list and fetch resources from a user's public storage
+- **List storage entries** — browse files and directories with type indicators
 - **Transport URL resolution** — convert `pubky://` URLs to HTTPS endpoints
 
 ## Installation
@@ -31,6 +32,7 @@ pubky-hs-inspect [URL] <COMMAND>
 | `inspect-user` | Inspect a Pubky user — resolve their homeserver, show storage and endpoints |
 | `pkdns` | Query raw PKRR DNS records (SVCB/HTTPS) |
 | `storage` | List public storage entries for a key |
+| `ls` | List files under a path for a user's storage |
 | `version` | Show tool version |
 
 ### Examples
@@ -120,6 +122,60 @@ $ pubky-hs-inspect storage 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
    pubky://<key>/pub/file1.json
    pubky://<key>/pub/file2.txt
    pubky://<key>/pub/pubky.app/profile.json
+```
+
+**List files under a storage path:**
+
+```bash
+$ pubky-hs-inspect ls 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
+
+═══ Storage File Listing ═══
+
+▸ Homeserver
+   Query key:   8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
+   Homeserver:  9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx
+   Status:      resolved ✓
+
+▸ Listing
+   Target: pubky://8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty/pub/
+
+   Total entries: 2
+
+   📄 pubky.app/profile.json
+   📁 my-app/
+
+$ pubky-hs-inspect ls 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty --path /pub/my-app/
+
+═══ Storage File Listing ═══
+
+▸ Homeserver
+   Query key:   8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty
+   Homeserver:  9kx3kz7y2jvm4h8qgdp1fwbncs5e6tuxragwoidz8h73bqy41vfx
+   Status:      resolved ✓
+
+▸ Listing
+   Target: pubky://8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty/pub/my-app/
+
+   Total entries: 3
+
+   📄 config.json
+   📁 assets/
+   📄 index.html
+
+# Navigate into a subdirectory
+$ pubky-hs-inspect ls 8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty --path /pub/my-app/assets/
+
+═══ Storage File Listing ═══
+
+▸ Listing
+   Target: pubky://8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty/pub/my-app/assets/
+
+   Total entries: 4
+
+   📄 logo.png
+   📄 style.css
+   📄 main.js
+   📄 favicon.ico
 ```
 
 **Resolve a `pubky://` URL:**
