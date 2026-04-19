@@ -76,7 +76,7 @@ pub enum Commands {
         user: Option<String>,
 
         /// Maximum number of events to fetch (default: 20)
-        #[arg(long, short, value_name = "N")]
+        #[arg(long, short = 'n', value_name = "N")]
         limit: Option<u64>,
 
         /// Reverse the event order (newest first)
@@ -84,7 +84,7 @@ pub enum Commands {
         reverse: bool,
 
         /// Keep streaming live events indefinitely
-        #[arg(long, short)]
+        #[arg(long)]
         live: bool,
 
         /// Homeserver key (z32), domain, or URL. Defaults to the global URL argument.

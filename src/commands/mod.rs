@@ -34,7 +34,7 @@ pub async fn run(cli: &Cli) -> crate::error::Result<()> {
         }) => {
             // Use global URL as fallback if homeserver not provided
             let target = homeserver.as_deref().or(cli.url.as_deref()).or(Some(""));
-            let hs = if target.unwrap_or("") == "" {
+            let hs = if target.as_ref().map_or(true, |s| s.is_empty()) {
                 None
             } else {
                 target.map(|s| s.trim_end_matches('/'))

@@ -13,12 +13,14 @@ pub async fn cmd_events_stream(
     live: bool,
 ) -> Result<()> {
     let client = Client::new()?;
-    let mode_label = if live { "(LIVE)" } else { "" };
     println!(
-        "{} {} {}",
+        "{} {}",
         "═══ Events Stream ═══".bold().cyan(),
-        mode_label.bold().magenta(),
-        if live { "" } else { "" }
+        if live {
+            "(LIVE)".bold().magenta()
+        } else {
+            String::new()
+        }
     );
     println!();
 
