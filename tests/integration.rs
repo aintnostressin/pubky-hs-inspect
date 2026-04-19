@@ -475,18 +475,22 @@ async fn test_events_integration() {
         events_rev.len()
     );
 
-    // If there are more than 1 event, the first and last should be different
-    // (i.e., the order is actually reversed, not identical)
-    if events_fwd.len() > 1 {
-        assert_ne!(
-            events_fwd.first(),
-            events_rev.first(),
-            "Reverse order should differ from forward order when there are multiple events"
-        );
-        assert_ne!(
-            events_fwd.last(),
-            events_rev.last(),
-            "Reverse order should differ from forward order when there are multiple events"
-        );
-    }
+    // Must have at least 2 events to meaningfully test reversal
+    assert!(
+        events_fwd.len() >= 2,
+        "Expected at least 2 events to verify reversal, got {}",
+        events_fwd.len()
+    );
+
+    // First and last events must differ — order is actually reversed, not identical
+    assert_ne!(
+        events_fwd.first(),
+        events_rev.first(),
+        "Reverse order should differ from forward order at the first event"
+    );
+    assert_ne!(
+        events_fwd.last(),
+        events_rev.last(),
+        "Reverse order should differ from forward order at the last event"
+    );
 }
