@@ -192,7 +192,7 @@ async fn cmd_inspect_user(input: &str) -> Result<()> {
                     // Use the resolved homeserver domain directly
                     println!("   Homeserver: {domain}");
                     println!("   URL:        https://{domain}/pub/");
-                    
+
                     // Try using the pubky:// format with z32 (will resolve to _pubky.z32)
                     let fallback = format!("pubky://{z32}/pub/");
                     match client.list(&fallback).await {
@@ -209,7 +209,10 @@ async fn cmd_inspect_user(input: &str) -> Result<()> {
                             println!("   {}", "no public entries".yellow());
                         }
                         Err(e) => {
-                            println!("   Note: pubky:// resolution failed ({}) - trying direct HTTPS...", e);
+                            println!(
+                                "   Note: pubky:// resolution failed ({}) - trying direct HTTPS...",
+                                e
+                            );
                             // Try direct HTTPS request to the homeserver
                             match reqwest::get(format!("https://{domain}/pub/?limit=5")).await {
                                 Ok(resp) => {
@@ -219,11 +222,18 @@ async fn cmd_inspect_user(input: &str) -> Result<()> {
                                             println!("   Status:  {}", "found ✓".green());
                                             println!("   Body:    {} bytes", body.len());
                                         } else {
-                                            println!("   Status:  {}", "unrecognized response".yellow());
+                                            println!(
+                                                "   Status:  {}",
+                                                "unrecognized response".yellow()
+                                            );
                                             println!("   Body:    {} bytes", body.len());
                                         }
                                     } else {
-                                        println!("   Status:  {} ({})", "error".red(), resp.status());
+                                        println!(
+                                            "   Status:  {} ({})",
+                                            "error".red(),
+                                            resp.status()
+                                        );
                                     }
                                 }
                                 Err(e) => {

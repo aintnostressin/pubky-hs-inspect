@@ -1,5 +1,5 @@
-use pkarr::SignedPacket;
 use pkarr::dns::rdata::RData;
+use pkarr::SignedPacket;
 use pubky::Pubky;
 use pubky::{Pkdns, PublicKey};
 
@@ -33,12 +33,9 @@ impl Client {
     /// Low-level PKRR endpoint resolution via the pkarr crate.
     /// Resolves the public key packet directly and extracts _pubky SVCB/HTTPS records.
     /// Returns the homeserver host as a string (domain or z32 pubkey-as-host).
-    pub async fn resolve_pkrr_endpoint(
-        &self,
-        z32: &str,
-    ) -> Option<String> {
+    pub async fn resolve_pkrr_endpoint(&self, z32: &str) -> Option<String> {
         let pkarr_client = self.pubky.client().pkarr().clone();
-        
+
         // Parse the public key and resolve the packet directly
         if let Ok(pk) = pkarr::PublicKey::try_from(z32) {
             if let Some(packet) = pkarr_client.resolve(&pk).await {
@@ -59,7 +56,7 @@ impl Client {
     pub async fn get_homeserver_address(&self, pk: &PublicKey) -> Option<HomeserverInfo> {
         let z32 = pk.z32();
         let pkarr_client = self.pubky.client().pkarr().clone();
-        
+
         // Resolve the packet directly from the public key (not _pubky.<key>)
         if let Ok(pkarr_pk) = pkarr::PublicKey::try_from(&z32) {
             if let Some(packet) = pkarr_client.resolve(&pkarr_pk).await {
@@ -68,15 +65,13 @@ impl Client {
                     // Determine if target is a domain or a pubkey-as-host
                     let is_domain = target.contains('.');
                     let is_z32 = is_z32(&target);
-                    
-                    let hs_z32 = if is_domain {
-                        target.clone()
-                    } else if is_z32 {
+
+                    let hs_z32 = if is_domain || is_z32 {
                         target.clone()
                     } else {
                         z32.clone()
                     };
-                    
+
                     let domain = if is_domain {
                         Some(target.clone())
                     } else {
@@ -97,7 +92,7 @@ impl Client {
                 }
             }
         }
-        
+
         // Fallback: high-level SDK resolution
         if let Some(hs_pk) = self.resolve_homeserver(pk).await {
             let hs_z32 = hs_pk.z32();
@@ -248,7 +243,7 @@ fn extract_host_from_packet(packet: &SignedPacket) -> Option<String> {
             _ => {}
         }
     }
-    
+
     // Fallback: check for records at the zone apex (root)
     // This handles non-standard PKRR deployments that store records at the key itself
     for rr in packet.resource_records("@") {
@@ -268,7 +263,7 @@ fn extract_host_from_packet(packet: &SignedPacket) -> Option<String> {
             _ => {}
         }
     }
-    
+
     None
 }
 
