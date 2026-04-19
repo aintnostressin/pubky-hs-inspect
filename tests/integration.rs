@@ -225,10 +225,8 @@ async fn test_events_without_homeserver() {
 // These tests use pubky-testnet::EphemeralTestnet to spin up a local
 // DHT + homeserver + relay for fully offline testing.
 //
-// To run these tests: cargo test --test integration -- --ignored
-//
-// Note: These tests spin up a full local testnet with DHT, homeserver,
-// relay, and PostgreSQL. Expect ~30-60 seconds per test.
+// Uses embedded PostgreSQL (embedded-postgres feature) - no external
+// PostgreSQL installation required.
 
 /// Wrapper that keeps a testnet alive for the duration of a test.
 struct TestContext {
@@ -241,6 +239,7 @@ struct TestContext {
 async fn setup_testnet() -> TestContext {
     let testnet = pubky_testnet::EphemeralTestnet::builder()
         .with_http_relay()
+        .with_embedded_postgres()
         .config(pubky_testnet::pubky_homeserver::ConfigToml::default_test_config())
         .build()
         .await
@@ -276,7 +275,7 @@ async fn create_test_user(
 /// Verifies that the inspect command correctly resolves and displays
 /// homeserver information from a real local homeserver.
 #[tokio::test]
-#[ignore = "spins up ephemeral testnet (slow)"]
+
 async fn test_inspect_homeserver_integration() {
     let ctx = setup_testnet().await;
     let hs_z32 = ctx.homeserver_pub_key.z32();
@@ -294,7 +293,7 @@ async fn test_inspect_homeserver_integration() {
 /// Verifies that the inspect-user command correctly resolves a user's
 /// homeserver and displays storage information.
 #[tokio::test]
-#[ignore = "spins up ephemeral testnet (slow)"]
+
 async fn test_inspect_user_integration() {
     let ctx = setup_testnet().await;
     let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
@@ -315,7 +314,7 @@ async fn test_inspect_user_integration() {
 /// Verifies that the storage command correctly lists public storage entries
 /// for a user who has uploaded files.
 #[tokio::test]
-#[ignore = "spins up ephemeral testnet (slow)"]
+
 async fn test_storage_listing_integration() {
     let ctx = setup_testnet().await;
     let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
@@ -345,7 +344,7 @@ async fn test_storage_listing_integration() {
 /// Verifies that the ls command correctly lists files in a user's storage
 /// directory structure.
 #[tokio::test]
-#[ignore = "spins up ephemeral testnet (slow)"]
+
 async fn test_ls_listing_integration() {
     let ctx = setup_testnet().await;
     let (session, user_z32, _hs_z32) = create_test_user(&ctx).await;
@@ -400,7 +399,7 @@ async fn test_ls_listing_integration() {
 /// Verifies that the events command correctly fetches and displays
 /// file change events from a homeserver.
 #[tokio::test]
-#[ignore = "spins up ephemeral testnet (slow)"]
+
 async fn test_events_integration() {
     let ctx = setup_testnet().await;
     let (session, _user_z32, _hs_z32) = create_test_user(&ctx).await;
