@@ -237,12 +237,10 @@ impl Client {
             url.query_pairs_mut().append_pair("cursor", c);
         }
         if let Some(l) = limit {
-            url.query_pairs_mut()
-                .append_pair("limit", &l.to_string());
+            url.query_pairs_mut().append_pair("limit", &l.to_string());
         }
         if let Some(pk) = pubky_host {
-            url.query_pairs_mut()
-                .append_pair("pubky-host", pk);
+            url.query_pairs_mut().append_pair("pubky-host", pk);
         }
 
         let resp = reqwest::get(url.to_string()).await.map_err(|e| {
