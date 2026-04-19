@@ -419,10 +419,7 @@ async fn test_events_integration() {
     let client = Client::new().unwrap();
 
     // Call get_events and verify the response.
-    // NOTE: This test will fail until the homeserver fixes a routing bug
-    // where /events/ is intercepted by the tenants router's catch-all
-    // /{*path} route, which applies the AuthorizationLayer that rejects
-    // non-/pub/ paths. The fix is to define /events/ after the merge.
+    // The /events/ endpoint should return actual events (not Matrix or auth errors).
     let (events, _next_cursor) = client
         .get_events(&base_url, None, Some(10), Some(&hs_z32))
         .await
