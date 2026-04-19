@@ -40,7 +40,10 @@ pub fn cmd_version() -> crate::error::Result<()> {
 
 /// Resolve a homeserver identifier to a full HTTP base URL.
 /// Tries the input directly as a URL, or resolves it via PKRR if it's a z32 key.
-pub async fn resolve_homeserver_url(client: &crate::client::Client, input: &str) -> crate::error::Result<String> {
+pub async fn resolve_homeserver_url(
+    client: &crate::client::Client,
+    input: &str,
+) -> crate::error::Result<String> {
     // If it looks like a URL, use it directly
     if input.starts_with("http://") || input.starts_with("https://") {
         Ok(input.trim_end_matches('/').to_string())

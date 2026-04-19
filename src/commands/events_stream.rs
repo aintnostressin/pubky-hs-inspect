@@ -1,7 +1,7 @@
 use colored::Colorize;
 
 use crate::client::Client;
-use crate::commands::shared::{resolve_homeserver_url, print_sse_event};
+use crate::commands::shared::{print_sse_event, resolve_homeserver_url};
 use crate::error::Result;
 
 /// Stream events from a homeserver in real-time via the /events-stream/ endpoint.
@@ -14,7 +14,11 @@ pub async fn cmd_events_stream(
 ) -> Result<()> {
     let client = Client::new()?;
     if live {
-        println!("{} {}", "═══ Events Stream ═══".bold().cyan(), "(LIVE)".bold().magenta());
+        println!(
+            "{} {}",
+            "═══ Events Stream ═══".bold().cyan(),
+            "(LIVE)".bold().magenta()
+        );
     } else {
         println!("{}", "═══ Events Stream ═══".bold().cyan());
     }
