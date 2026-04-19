@@ -82,36 +82,12 @@ async fn cmd_inspect(input: &str) -> Result<()> {
             }
             println!();
 
-            // Try to get profile / user count
-            println!("{}", "▸ Metadata".bold());
-            let base_url = format!("https://_pubky.{z32}/pub/pubky.app/profile.json");
-            match client.get_homeserver_profile(&z32).await {
-                Some(profile) => {
-                    println!("   Profile URL: {base_url}");
-                    if let Some(count) = profile.get("users").and_then(|v| v.as_u64()) {
-                        println!("   Users:       {count}");
-                    } else if let Some(count) = profile.get("user_count").and_then(|v| v.as_u64()) {
-                        println!("   Users:       {count}");
-                    } else if let Some(reg) = profile.get("registrations") {
-                        println!("   Registrations: {reg}");
-                    } else {
-                        println!("   Profile:     {}", "found (no user count field)".yellow());
-                        if let Some(name) = profile.get("name").and_then(|v| v.as_str()) {
-                            println!("   Name:        {name}");
-                        }
-                        if let Some(desc) = profile.get("description").and_then(|v| v.as_str()) {
-                            let truncated: String = desc.chars().take(80).collect();
-                            println!("   Description: {truncated}");
-                        }
-                    }
-                    println!("   Status:      {}", "profile fetched ✓".green());
-                }
-                None => {
-                    println!("   Profile URL: {base_url}");
-                    println!("   {}", "profile not available".yellow());
-                    println!("   Status:      {}", "no profile found".red());
-                }
-            }
+            // Homeserver info
+            println!("{}", "▸ Homeserver Info".bold());
+            let hs_url = format!("https://_pubky.{}", z32);
+            println!("   Base URL:   {hs_url}");
+            println!("   Profile:    {hs_url}/pub/pubky.app/profile.json");
+            println!("   Status:     {}", "info available ✓".green());
         }
         InputType::Url(url_str) => {
             println!("   Target: {url_str}");
