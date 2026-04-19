@@ -386,8 +386,7 @@ async fn test_ls_listing_integration() {
 
 /// Test events against a local testnet.
 /// Verifies that the events command correctly fetches and displays
-/// file change events from a homeserver, and that the URL uses the
-/// correct Pubky `/events/` path (not Matrix `/_matrix/client/v3/events/`).
+/// file change events from a homeserver.
 #[tokio::test]
 
 async fn test_events_integration() {
@@ -419,7 +418,6 @@ async fn test_events_integration() {
     let client = Client::new().unwrap();
 
     // Call get_events and verify the response.
-    // The /events/ endpoint should return actual events (not Matrix or auth errors).
     let (events, _next_cursor) = client
         .get_events(&base_url, None, Some(10), Some(&hs_z32))
         .await
