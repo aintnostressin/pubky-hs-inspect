@@ -339,7 +339,7 @@ impl Client {
         user: Option<&str>,
         limit: Option<u64>,
         reverse: bool,
-    ) -> std::result::Result<futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>, crate::error::Error> {
+    ) -> std::result::Result<futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>, pubky::Error> {
         // Build URL the same way as stream_events
         let base = url::Url::parse(base_url).map_err(|e| {
             pubky::Error::Request(pubky::errors::RequestError::Validation {
@@ -511,7 +511,7 @@ impl InputType {
 /// Yields `SseEvent` immediately when an event block is complete (blank line or EOF).
 pub async fn stream_sse_events(
     url: String,
-) -> std::result::Result<futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>, crate::error::Error> {
+) -> std::result::Result<futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>, pubky::Error> {
     let resp = reqwest::get(&url).await.map_err(|e| {
         pubky::Error::Request(pubky::errors::RequestError::Validation {
             message: format!("Failed to stream events: {e}"),
