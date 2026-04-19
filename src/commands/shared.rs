@@ -63,6 +63,49 @@ pub async fn resolve_homeserver_url(
     }
 }
 
+/// State for accumulating a single SSE event during parsing.
+pub struct SseEventAccumulator {
+    path: Option<String>,
+    cursor: Option<u64>,
+    hash: Option<String>,
+}
+
+impl SseEventAccumulator {
+    pub fn new() -> Self {
+        Self {
+            path: None,
+            cursor: None,
+            hash: None,
+        }
+    }
+
+    /// Process a single SSE line. Returns true if the line was blank (event boundary).
+    pub fn process_line(&mut self, line: &str) -> bool {
+        if line.is_empty() {
+            return true;
+        }
+        if let Some(rest) = line.strip_prefix("path: ") {
+            self.path = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("cursor: ") {
+            if let Ok(cursor) = rest.trim().parse::<u64>() {
+                self.cursor = Some(cursor);
+            }
+        } else if let Some(rest) = line.strip_prefix("content_hash: ") {
+            self.hash = Some(rest.to_string());
+        }
+        false
+    }
+
+    /// Try to build a complete event from accumulated state. Returns `Some` when ready.
+    pub fn try_emit(&mut self) -> Option<SseEvent> {
+        self.path.take().zip(self.cursor.take()).map(|(path, cursor)| SseEvent {
+            path,
+            cursor,
+            content_hash: self.hash.take(),
+        })
+    }
+}
+
 /// Parse a batch of SSE lines into a vector of parsed events.
 /// Format per event:
 ///   path: <event_type> <path>
@@ -70,40 +113,21 @@ pub async fn resolve_homeserver_url(
 ///   content_hash: <base64>  (optional)
 ///   <blank line separates events>
 pub fn parse_sse_batch(text: &str) -> Vec<SseEvent> {
+    let mut acc = SseEventAccumulator::new();
     let mut events = Vec::new();
-    let mut current_path: Option<String> = None;
-    let mut current_cursor: Option<u64> = None;
-    let mut current_hash: Option<String> = None;
 
     for line in text.lines() {
-        let line = line.trim_end();
-        if line.is_empty() {
-            // End of event block — emit if we have data
-            if let (Some(path), Some(cursor)) = (current_path.take(), current_cursor.take()) {
-                events.push(SseEvent {
-                    path,
-                    cursor,
-                    content_hash: current_hash.take(),
-                });
+        if acc.process_line(line.trim_end()) {
+            // Blank line = event boundary
+            if let Some(event) = acc.try_emit() {
+                events.push(event);
             }
-        } else if let Some(rest) = line.strip_prefix("path: ") {
-            current_path = Some(rest.to_string());
-        } else if let Some(rest) = line.strip_prefix("cursor: ") {
-            if let Ok(cursor) = rest.trim().parse::<u64>() {
-                current_cursor = Some(cursor);
-            }
-        } else if let Some(rest) = line.strip_prefix("content_hash: ") {
-            current_hash = Some(rest.trim().to_string());
         }
     }
 
     // Emit any remaining event (no trailing blank line)
-    if let (Some(path), Some(cursor)) = (current_path, current_cursor) {
-        events.push(SseEvent {
-            path,
-            cursor,
-            content_hash: current_hash,
-        });
+    if let Some(event) = acc.try_emit() {
+        events.push(event);
     }
 
     events
@@ -136,6 +160,90 @@ pub fn print_sse_event(event: &SseEvent) {
         println!();
     } else {
         println!("  {}", event.path);
+    }
+}
+
+/// Async stream that parses SSE events from a bytes stream.
+/// Uses `SseEventAccumulator` for incremental line parsing.
+pub struct SseEventStream {
+    body: futures::stream::BoxStream<'static, std::result::Result<bytes::Bytes, reqwest::Error>>,
+    eof: bool,
+    line_buf: String,
+    acc: SseEventAccumulator,
+}
+
+impl SseEventStream {
+    pub fn new<B>(body: B) -> Self
+    where
+        B: futures::Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
+    {
+        Self {
+            body: Box::pin(body),
+            eof: false,
+            line_buf: String::new(),
+            acc: SseEventAccumulator::new(),
+        }
+    }
+}
+
+impl futures::Stream for SseEventStream {
+    type Item = std::result::Result<SseEvent, pubky::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        loop {
+            // If EOF, emit any pending event and end
+            if self.eof {
+                return std::task::Poll::Ready(self.acc.try_emit().map(Ok));
+            }
+
+            // Poll the body stream
+            match std::pin::Pin::new(&mut self.body).poll_next(cx) {
+                std::task::Poll::Ready(Some(Ok(bytes))) => {
+                    self.line_buf.push_str(&String::from_utf8_lossy(&bytes));
+
+                    // Collect complete lines (avoiding borrow checker issues)
+                    let lines: Vec<String> = self
+                        .line_buf
+                        .split('\n')
+                        .map(|s| s.trim_end_matches('\r').to_string())
+                        .collect();
+                    self.line_buf.clear();
+
+                    // Process all but the last line (which may be partial)
+                    for line in lines.iter().take(lines.len().saturating_sub(1)) {
+                        if self.acc.process_line(line) {
+                            // Blank line = event boundary
+                            if let Some(event) = self.acc.try_emit() {
+                                return std::task::Poll::Ready(Some(Ok(event)));
+                            }
+                        }
+                    }
+
+                    // Keep the last (partial) line if buffer didn't end with newline
+                    if lines.last() == Some(&String::new()) && !self.line_buf.ends_with('\n') {
+                        // Empty line means buffer ended with \n, nothing to keep
+                    } else {
+                        self.line_buf = lines.last().cloned().unwrap_or_default();
+                    }
+                }
+                std::task::Poll::Ready(Some(Err(e))) => {
+                    self.eof = true;
+                    return std::task::Poll::Ready(Some(Err(pubky::Error::Request(
+                        pubky::errors::RequestError::Validation {
+                            message: format!("Stream error: {e}"),
+                        },
+                    ))));
+                }
+                std::task::Poll::Ready(None) => {
+                    // EOF — emit any pending event
+                    self.eof = true;
+                }
+                std::task::Poll::Pending => return std::task::Poll::Pending,
+            }
+        }
     }
 }
 

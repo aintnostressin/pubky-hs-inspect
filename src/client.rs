@@ -1,11 +1,10 @@
-use bytes::Bytes;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use pkarr::dns::rdata::RData;
 use pkarr::SignedPacket;
 use pubky::Pubky;
 use pubky::{Pkdns, PublicKey};
 
-use crate::commands::shared::{parse_sse_batch, SseEvent};
+use crate::commands::shared::{parse_sse_batch, SseEvent, SseEventStream};
 use crate::error::Result;
 
 /// Stream result type — used for both `stream_sse_events` and `Client::stream_events_streamed`
@@ -13,12 +12,6 @@ type StreamResult<T> = std::result::Result<T, pubky::Error>;
 
 /// Type alias for boxed SSE event streams
 type EventStream = futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>;
-
-/// Item type for the SSE event stream
-type SseStreamItem = std::result::Result<SseEvent, pubky::Error>;
-
-/// Pinned body stream yielding `Bytes` chunks
-type BodyStream = std::pin::Pin<Box<dyn futures::Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send>>;
 
 /// Client wrapper around the pubky SDK with PKRR resolution helpers.
 pub struct Client {
@@ -529,107 +522,6 @@ pub async fn stream_sse_events(url: String) -> StreamResult<EventStream> {
     })?;
 
     Ok(SseEventStream::new(resp.bytes_stream()).boxed())
-}
-
-/// Async stream that parses SSE events from a bytes stream.
-struct SseEventStream {
-    body: BodyStream,
-    eof: bool,
-    line_buf: String,
-    current_path: Option<String>,
-    current_cursor: Option<u64>,
-    current_hash: Option<String>,
-}
-
-impl SseEventStream {
-    fn new<B>(body: B) -> Self
-    where
-        B: futures::Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + 'static,
-    {
-        Self {
-            body: Box::pin(body),
-            eof: false,
-            line_buf: String::new(),
-            current_path: None,
-            current_cursor: None,
-            current_hash: None,
-        }
-    }
-
-    /// Try to build and consume a complete event. Returns `Some` when `path` and `cursor`
-    /// are both present. Uses `.take()` so state is cleared automatically.
-    fn try_emit(&mut self) -> Option<SseEvent> {
-        self.current_path.take().zip(self.current_cursor.take()).map(|(path, cursor)| SseEvent {
-            path,
-            cursor,
-            content_hash: self.current_hash.take(),
-        })
-    }
-
-    /// Parse a single SSE line. Returns a completed event if the line was blank (event boundary).
-    fn process_line(&mut self, line: &str) -> Option<SseEvent> {
-        // Blank line signals end of event
-        if line.is_empty() {
-            return self.try_emit();
-        }
-
-        // Match on prefix manually (avoids experimental if-let guards)
-        if let Some(rest) = line.strip_prefix("path: ") {
-            self.current_path = Some(rest.to_string());
-        } else if let Some(rest) = line.strip_prefix("cursor: ") {
-            if let Ok(cursor) = rest.trim().parse::<u64>() {
-                self.current_cursor = Some(cursor);
-            }
-        } else if let Some(rest) = line.strip_prefix("content_hash: ") {
-            self.current_hash = Some(rest.to_string());
-        }
-
-        None
-    }
-}
-
-impl futures::Stream for SseEventStream {
-    type Item = SseStreamItem;
-
-    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
-        loop {
-            // If EOF, emit any pending event and end
-            if self.eof {
-                return std::task::Poll::Ready(self.try_emit().map(Ok));
-            }
-
-            // Poll the body stream directly
-            match self.body.as_mut().poll_next(cx) {
-                std::task::Poll::Ready(Some(Ok(bytes))) => {
-                    self.line_buf.push_str(&String::from_utf8_lossy(&bytes));
-
-                    // Process complete lines, keeping partial line in buffer
-                    let mut parts = self.line_buf.split('\n');
-                    for line in parts.by_ref() {
-                        if let Some(event) = self.process_line(line.trim_end_matches('\r')) {
-                            return std::task::Poll::Ready(Some(Ok(event)));
-                        }
-                    }
-
-                    // Keep remaining partial line (if any)
-                    self.line_buf = parts.next().unwrap_or("").to_string();
-                }
-                std::task::Poll::Ready(Some(Err(e))) => {
-                    self.eof = true;
-                    return std::task::Poll::Ready(Some(Err(pubky::Error::Request(
-                        pubky::errors::RequestError::Validation {
-                            message: format!("Stream error: {e}"),
-                        },
-                    ))));
-                }
-                std::task::Poll::Ready(None) => {
-                    // EOF — emit any pending event
-                    self.eof = true;
-                }
-                std::task::Poll::Pending => return std::task::Poll::Pending,
-            }
-        }
-    }
 }
 
 #[cfg(test)]
