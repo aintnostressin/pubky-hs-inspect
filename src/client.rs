@@ -1,3 +1,5 @@
+use pkarr::SignedPacket;
+use pkarr::dns::rdata::RData;
 use pubky::Pubky;
 use pubky::{Pkdns, PublicKey};
 
@@ -29,15 +31,22 @@ impl Client {
     }
 
     /// Low-level PKRR endpoint resolution via the pkarr crate.
-    /// Queries the `_pubky.<z32>` SVCB/HTTPS record directly and
-    /// returns the resolved endpoint data.
+    /// Resolves the public key packet directly and extracts _pubky SVCB/HTTPS records.
+    /// Returns the homeserver host as a string (domain or z32 pubkey-as-host).
     pub async fn resolve_pkrr_endpoint(
         &self,
         z32: &str,
-    ) -> Option<pkarr::extra::endpoints::Endpoint> {
+    ) -> Option<String> {
         let pkarr_client = self.pubky.client().pkarr().clone();
-        let qname = format!("_pubky.{z32}");
-        pkarr_client.resolve_svcb_endpoint(&qname).await.ok()
+        
+        // Parse the public key and resolve the packet directly
+        if let Ok(pk) = pkarr::PublicKey::try_from(z32) {
+            if let Some(packet) = pkarr_client.resolve(&pk).await {
+                // Extract _pubky host from the packet
+                return extract_host_from_packet(&packet);
+            }
+        }
+        None
     }
 
     /// Create a read-only PKDNS actor for SDK-level queries.
@@ -49,59 +58,59 @@ impl Client {
     /// the PKRR record for a user public key.
     pub async fn get_homeserver_address(&self, pk: &PublicKey) -> Option<HomeserverInfo> {
         let z32 = pk.z32();
-        let qname = format!("_pubky.{z32}");
-
-        // Try the pkarr client for detailed endpoint info
         let pkarr_client = self.pubky.client().pkarr().clone();
-        match pkarr_client.resolve_svcb_endpoint(&qname).await {
-            Ok(endpoint) => {
-                let target = endpoint.target().to_string();
-                let domain = endpoint.domain().map(|s| s.to_string());
-                let port = endpoint.port();
-                let record_pk = endpoint.public_key();
+        
+        // Resolve the packet directly from the public key (not _pubky.<key>)
+        if let Ok(pkarr_pk) = pkarr::PublicKey::try_from(&z32) {
+            if let Some(packet) = pkarr_client.resolve(&pkarr_pk).await {
+                // Extract _pubky host from the packet
+                if let Some(target) = extract_host_from_packet(&packet) {
+                    // Determine if target is a domain or a pubkey-as-host
+                    let is_domain = target.contains('.');
+                    let is_z32 = is_z32(&target);
+                    
+                    let hs_z32 = if is_domain {
+                        target.clone()
+                    } else if is_z32 {
+                        target.clone()
+                    } else {
+                        z32.clone()
+                    };
+                    
+                    let domain = if is_domain {
+                        Some(target.clone())
+                    } else {
+                        None
+                    };
 
-                // The homeserver address is:
-                // - domain() if set (ICANN domain)
-                // - target if it looks like a z32 pubkey-as-host
-                // - the record's own public key z32 as fallback
-                let hs_z32 = domain
-                    .clone()
-                    .or_else(|| {
-                        if target == "." || target.contains('.') {
-                            domain.clone()
-                        } else if is_z32(&target) {
-                            Some(target.clone())
-                        } else {
-                            Some(z32.clone())
-                        }
-                    })
-                    .unwrap_or_else(|| z32.clone());
+                    // Parse the homeserver as a PublicKey if it looks like one
+                    let record_pk = pubky::PublicKey::try_from_z32(&hs_z32).ok();
 
-                Some(HomeserverInfo {
-                    user: pk.clone(),
-                    user_z32: z32,
-                    homeserver_z32: hs_z32,
-                    homeserver_domain: domain,
-                    port,
-                    record_public_key: pubky::PublicKey::from(record_pk),
-                })
-            }
-            Err(_) => {
-                // Fallback: high-level SDK resolution
-                if let Some(hs_pk) = self.resolve_homeserver(pk).await {
-                    let hs_z32 = hs_pk.z32();
-                    Some(HomeserverInfo {
+                    return Some(HomeserverInfo {
                         user: pk.clone(),
                         user_z32: z32,
                         homeserver_z32: hs_z32,
-                        homeserver_domain: None,
+                        homeserver_domain: domain,
                         port: None,
-                        record_public_key: hs_pk,
-                    })
-                } else {
-                    None
+                        record_public_key: record_pk.unwrap_or_else(|| pk.clone()),
+                    });
                 }
             }
+        }
+        
+        // Fallback: high-level SDK resolution
+        if let Some(hs_pk) = self.resolve_homeserver(pk).await {
+            let hs_z32 = hs_pk.z32();
+            Some(HomeserverInfo {
+                user: pk.clone(),
+                user_z32: z32,
+                homeserver_z32: hs_z32,
+                homeserver_domain: None,
+                port: None,
+                record_public_key: hs_pk,
+            })
+        } else {
+            None
         }
     }
 
@@ -201,6 +210,55 @@ impl HomeserverInfo {
         };
         format!("{base}{path}")
     }
+}
+
+/// Extract the homeserver host from a PKRR packet's _pubky records.
+/// This mirrors the logic in `pubky::actors::pkdns::extract_host_from_packet`.
+///
+/// If no _pubky records are found, also checks for records at the zone apex
+/// (the public key name itself) since some PKRR deployments store records there.
+fn extract_host_from_packet(packet: &SignedPacket) -> Option<String> {
+    // First, try _pubky records (standard PKRR location)
+    for rr in packet.resource_records("_pubky") {
+        match &rr.rdata {
+            RData::SVCB(svcb) => {
+                let target = svcb.target.to_string();
+                // Skip root targets (empty string or ".")
+                if !target.is_empty() && target != "." {
+                    return Some(target);
+                }
+            }
+            RData::HTTPS(https) => {
+                let target = https.0.target.to_string();
+                if !target.is_empty() && target != "." {
+                    return Some(target);
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    // Fallback: check for records at the zone apex (root)
+    // This handles non-standard PKRR deployments that store records at the key itself
+    for rr in packet.resource_records("@") {
+        match &rr.rdata {
+            RData::SVCB(svcb) => {
+                let target = svcb.target.to_string();
+                if !target.is_empty() && target != "." {
+                    return Some(target);
+                }
+            }
+            RData::HTTPS(https) => {
+                let target = https.0.target.to_string();
+                if !target.is_empty() && target != "." {
+                    return Some(target);
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    None
 }
 
 // ── Input parsing ──────────────────────────────────────────────────

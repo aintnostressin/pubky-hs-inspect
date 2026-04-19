@@ -63,25 +63,20 @@ async fn cmd_inspect(input: &str) -> Result<()> {
             // PKRR endpoint resolution
             println!("{}", "▸ PKRR Endpoint Resolution".bold());
             match client.resolve_pkrr_endpoint(&z32).await {
-                Some(endpoint) => {
-                    let target = endpoint.target();
-                    let domain = endpoint.domain();
-                    let port = endpoint.port();
-                    let ep_pk = endpoint.public_key();
+                Some(target) => {
+                    let domain = if target.contains('.') {
+                        Some(target.clone())
+                    } else {
+                        None
+                    };
 
-                    println!("   Target:  {target}");
+                    println!("   Host:      {target}");
                     if let Some(d) = domain {
-                        println!("   Domain:  {d}");
-                    } else if target == "." {
-                        println!("   Domain:  (none — target is '.')");
+                        println!("   Domain:    {d}");
                     } else if target.len() == 52 {
-                        println!("   Domain:  (pubkey-as-host — {target})");
+                        println!("   (pubkey-as-host)");
                     }
-                    if let Some(p) = port {
-                        println!("   Port:    {p}");
-                    }
-                    println!("   Record PK: {}", pubky::PublicKey::from(ep_pk));
-                    println!("   Status:  {}", "PKRR record resolved ✓".green());
+                    println!("   Status:    {}", "PKRR record resolved ✓".green());
                 }
                 None => {
                     println!("   {}", "no PKRR record found".yellow());
@@ -101,7 +96,60 @@ async fn cmd_inspect(input: &str) -> Result<()> {
 
             // Public storage
             println!("{}", "▸ Public Storage".bold());
-            let pub_addr = format!("pubky://{z32}/pub/");
+            // Use the homeserver domain if available, otherwise fall back to z32
+            let pub_addr = if let Some(info) = client.get_homeserver_address(&pk).await {
+                if let Some(domain) = &info.homeserver_domain {
+                    // Use the resolved homeserver domain directly
+                    println!("   Homeserver: {domain}");
+                    println!("   URL:        https://{domain}/pub/");
+                    
+                    // Try using the pubky:// format with z32 (will resolve to _pubky.z32)
+                    let fallback = format!("pubky://{z32}/pub/");
+                    match client.list(&fallback).await {
+                        Ok(entries) if !entries.is_empty() => {
+                            println!("   Found {} entry(ies) (via pubky://):", entries.len());
+                            for entry in entries.iter().take(10) {
+                                println!("     {}", entry);
+                            }
+                            if entries.len() > 10 {
+                                println!("     ... and {} more", entries.len() - 10);
+                            }
+                        }
+                        Ok(_) => {
+                            println!("   {}", "no public entries".yellow());
+                        }
+                        Err(e) => {
+                            println!("   Note: pubky:// resolution failed ({}) - trying direct HTTPS...", e);
+                            // Try direct HTTPS request to the homeserver
+                            match reqwest::get(format!("https://{domain}/pub/?limit=5")).await {
+                                Ok(resp) => {
+                                    if resp.status().is_success() {
+                                        let body = resp.text().await.unwrap_or_default();
+                                        if body.contains("items") || body.starts_with('[') {
+                                            println!("   Status:  {}", "found ✓".green());
+                                            println!("   Body:    {} bytes", body.len());
+                                        } else {
+                                            println!("   Status:  {}", "unrecognized response".yellow());
+                                            println!("   Body:    {} bytes", body.len());
+                                        }
+                                    } else {
+                                        println!("   Status:  {} ({})", "error".red(), resp.status());
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("   Error:   {}", e);
+                                }
+                            }
+                        }
+                    }
+                    println!();
+                    return Ok(());
+                } else {
+                    format!("pubky://{z32}/pub/")
+                }
+            } else {
+                format!("pubky://{z32}/pub/")
+            };
             match client.list(&pub_addr).await {
                 Ok(entries) if !entries.is_empty() => {
                     println!("   Found {} entry(ies):", entries.len());
@@ -200,30 +248,14 @@ async fn cmd_pkdns(input: &str) -> Result<()> {
             // Low-level endpoint resolution
             println!("{}", "▸ Endpoint Resolution".bold());
             match client.resolve_pkrr_endpoint(&z32).await {
-                Some(endpoint) => {
-                    let target = endpoint.target();
-                    let domain = endpoint.domain();
-                    let port = endpoint.port();
-                    let ep_pk = endpoint.public_key();
-
-                    println!(
-                        "   Target:   {}",
-                        if target == "." {
-                            "(none)".to_string()
-                        } else {
-                            target.to_string()
-                        }
-                    );
-                    let domain_str = match domain {
-                        Some(d) => d.to_string(),
-                        None => "(pubkey-as-host)".to_string(),
+                Some(target) => {
+                    let domain_str = if target.contains('.') {
+                        target.clone()
+                    } else {
+                        "(pubkey-as-host)".to_string()
                     };
-                    println!("   Domain:   {domain_str}");
-                    let port_str = port
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| "(default)".to_string());
-                    println!("   Port:     {port_str}");
-                    println!("   Record PK: {}", pubky::PublicKey::from(ep_pk));
+                    println!("   Host:    {target}");
+                    println!("   Domain:  {domain_str}");
                 }
                 None => {
                     println!("   {}", "no PKRR record found".yellow());
