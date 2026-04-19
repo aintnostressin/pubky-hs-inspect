@@ -13,15 +13,11 @@ pub async fn cmd_events_stream(
     live: bool,
 ) -> Result<()> {
     let client = Client::new()?;
-    println!(
-        "{} {}",
-        "═══ Events Stream ═══".bold().cyan(),
-        if live {
-            "(LIVE)".bold().magenta()
-        } else {
-            String::new()
-        }
-    );
+    if live {
+        println!("{} {}", "═══ Events Stream ═══".bold().cyan(), "(LIVE)".bold().magenta());
+    } else {
+        println!("{}", "═══ Events Stream ═══".bold().cyan());
+    }
     println!();
 
     // Determine homeserver target
