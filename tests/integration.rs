@@ -15,7 +15,7 @@ use pubky_hs_inspect::commands;
 async fn test_version_command() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "version"]);
     assert!(matches!(cli.command, Some(Commands::Version)));
-    
+
     let result = commands::run(&cli).await;
     assert!(result.is_ok(), "version command should succeed");
 }
@@ -90,7 +90,13 @@ fn test_parse_ls_command_default_path() {
 
 #[test]
 fn test_parse_ls_command_custom_path() {
-    let cli = Cli::parse_from(["pubky-hs-inspect", "ls", "lsuser123key456", "--path", "/pub/my-app/"]);
+    let cli = Cli::parse_from([
+        "pubky-hs-inspect",
+        "ls",
+        "lsuser123key456",
+        "--path",
+        "/pub/my-app/",
+    ]);
     match cli.command {
         Some(Commands::Ls { url, path }) => {
             assert_eq!(url, "lsuser123key456");
@@ -150,7 +156,10 @@ async fn test_inspect_with_invalid_key() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "inspect", "short"]);
     let result = commands::run(&cli).await;
     // Should succeed but print an error message (not panic)
-    assert!(result.is_ok(), "inspect should handle invalid keys gracefully");
+    assert!(
+        result.is_ok(),
+        "inspect should handle invalid keys gracefully"
+    );
 }
 
 // ── Test: Inspect-user command with invalid key ────────────────────
@@ -159,7 +168,10 @@ async fn test_inspect_with_invalid_key() {
 async fn test_inspect_user_with_invalid_key() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "inspect-user", "short"]);
     let result = commands::run(&cli).await;
-    assert!(result.is_ok(), "inspect-user should handle invalid keys gracefully");
+    assert!(
+        result.is_ok(),
+        "inspect-user should handle invalid keys gracefully"
+    );
 }
 
 // ── Test: Storage command with invalid key ─────────────────────────
@@ -168,7 +180,10 @@ async fn test_inspect_user_with_invalid_key() {
 async fn test_storage_with_invalid_key() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "storage", "short"]);
     let result = commands::run(&cli).await;
-    assert!(result.is_ok(), "storage should handle invalid keys gracefully");
+    assert!(
+        result.is_ok(),
+        "storage should handle invalid keys gracefully"
+    );
 }
 
 // ── Test: Ls command with invalid key ──────────────────────────────
@@ -186,7 +201,10 @@ async fn test_ls_with_invalid_key() {
 async fn test_pkdns_with_invalid_key() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "pkdns", "short"]);
     let result = commands::run(&cli).await;
-    assert!(result.is_ok(), "pkdns should handle invalid keys gracefully");
+    assert!(
+        result.is_ok(),
+        "pkdns should handle invalid keys gracefully"
+    );
 }
 
 // ── Test: Events command without homeserver (tests error handling) ─
@@ -196,7 +214,10 @@ async fn test_events_without_homeserver() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "events"]);
     let result = commands::run(&cli).await;
     // Should succeed but print an error message
-    assert!(result.is_ok(), "events should handle missing homeserver gracefully");
+    assert!(
+        result.is_ok(),
+        "events should handle missing homeserver gracefully"
+    );
 }
 
 // ── Integration tests requiring testnet (marked ignore) ────────────
