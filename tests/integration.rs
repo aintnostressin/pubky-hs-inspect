@@ -122,6 +122,116 @@ fn test_parse_events_command() {
     }
 }
 
+// ── Test: CLI parsing - events-stream basic ────────────────────────
+
+#[test]
+fn test_parse_events_stream_command_basic() {
+    let cli = Cli::parse_from(["pubky-hs-inspect", "events-stream", "hs123key"]);
+    match cli.command {
+        Some(Commands::EventsStream {
+            user,
+            limit,
+            reverse,
+            live,
+            homeserver,
+        }) => {
+            assert_eq!(homeserver, Some("hs123key".to_string()));
+            assert_eq!(user, None);
+            assert_eq!(limit, None);
+            assert!(!reverse);
+            assert!(!live);
+        }
+        _ => panic!("expected EventsStream command"),
+    }
+}
+
+// ── Test: CLI parsing - events-stream with all flags ───────────────
+
+#[test]
+fn test_parse_events_stream_command_full() {
+    let cli = Cli::parse_from([
+        "pubky-hs-inspect",
+        "events-stream",
+        "-u",
+        "user123key",
+        "--limit",
+        "50",
+        "--reverse",
+        "--live",
+        "hs123key",
+    ]);
+    match cli.command {
+        Some(Commands::EventsStream {
+            user,
+            limit,
+            reverse,
+            live,
+            homeserver,
+        }) => {
+            assert_eq!(user, Some("user123key".to_string()));
+            assert_eq!(limit, Some(50));
+            assert!(reverse);
+            assert!(live);
+            assert_eq!(homeserver, Some("hs123key".to_string()));
+        }
+        _ => panic!("expected EventsStream command"),
+    }
+}
+
+// ── Test: CLI parsing - events-stream with -l shorthand ────────────
+
+#[test]
+fn test_parse_events_stream_command_shorthand() {
+    let cli = Cli::parse_from([
+        "pubky-hs-inspect",
+        "events-stream",
+        "-l",
+        "20",
+        "-r",
+        "hs456key",
+    ]);
+    match cli.command {
+        Some(Commands::EventsStream {
+            user,
+            limit,
+            reverse,
+            live,
+            homeserver,
+        }) => {
+            assert_eq!(user, None);
+            assert_eq!(limit, Some(20));
+            assert!(reverse);
+            assert!(!live);
+            assert_eq!(homeserver, Some("hs456key".to_string()));
+        }
+        _ => panic!("expected EventsStream command"),
+    }
+}
+
+// ── Test: CLI parsing - events-stream with global URL ──────────────
+
+#[test]
+fn test_parse_events_stream_command_url_flag() {
+    let cli = Cli::parse_from([
+        "pubky-hs-inspect",
+        "https://example.pubky.app",
+        "events-stream",
+        "--user",
+        "user789key",
+    ]);
+    assert_eq!(cli.url, Some("https://example.pubky.app".to_string()));
+    assert!(matches!(
+        cli.command,
+        Some(Commands::EventsStream { .. })
+    ));
+    match cli.command {
+        Some(Commands::EventsStream { user, .. }) => {
+            assert_eq!(user, Some("user789key".to_string()));
+        }
+        _ => panic!("expected EventsStream command"),
+    }
+}
+
 // ── Test: CLI parsing - events with -u flag (positional URL) ──────────
 
 #[test]
@@ -445,5 +555,110 @@ async fn test_events_integration() {
     assert!(
         result.is_ok(),
         "events command should succeed against testnet"
+    );
+}
+
+/// Test events-stream against a local testnet.
+/// Verifies that the events-stream endpoint correctly returns SSE-formatted
+/// events with path, cursor, and optional content_hash.
+#[tokio::test]
+async fn test_events_stream_integration() {
+    let ctx = setup_testnet().await;
+    let (session, _user_z32) = create_test_user(&ctx).await;
+
+    // Upload files to trigger events
+    session
+        .storage()
+        .put("/pub/stream-doc1.txt", "stream content 1")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+    session
+        .storage()
+        .put("/pub/stream-doc2.txt", "stream content 2")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+
+    let hs_z32 = ctx.homeserver_pub_key.z32();
+
+    // ── Verify stream_events returns valid SSE events from the homeserver ──
+
+    // Get the homeserver's local HTTP URL (http://127.0.0.1:<port>)
+    let base_url = ctx.testnet.homeserver_app().icann_http_url().to_string();
+    let client = Client::new().unwrap();
+
+    // Call stream_events and verify the response
+    let events = client
+        .stream_events(&base_url, None, Some(10), false)
+        .await
+        .expect("stream_events must succeed — homeserver returned an error");
+
+    // Events must not be empty
+    assert!(
+        !events.is_empty(),
+        "Expected events from homeserver, got empty list"
+    );
+
+    // Verify event structure
+    for event in &events {
+        assert!(
+            !event.path.is_empty(),
+            "Event path must not be empty, got cursor={}",
+            event.cursor
+        );
+        assert!(
+            event.path.starts_with("PUT ") || event.path.starts_with("DEL "),
+            "Event path must start with PUT or DEL, got: {}",
+            event.path
+        );
+        assert!(
+            event.cursor > 0,
+            "Event cursor must be positive, got: {}",
+            event.cursor
+        );
+    }
+
+    // ── CLI integration test ──
+
+    // Run the events-stream command to verify end-to-end routing works
+    let cli = Cli::parse_from(["pubky-hs-inspect", "events-stream", &hs_z32]);
+    let result = commands::run(&cli).await;
+    assert!(
+        result.is_ok(),
+        "events-stream command should succeed against testnet"
+    );
+}
+
+/// Test events-stream with user filter against a local testnet.
+#[tokio::test]
+async fn test_events_stream_with_user_filter() {
+    let ctx = setup_testnet().await;
+    let (session, user_z32) = create_test_user(&ctx).await;
+
+    // Upload a file
+    session
+        .storage()
+        .put("/pub/filtered-doc.txt", "filtered content")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+
+    let base_url = ctx.testnet.homeserver_app().icann_http_url().to_string();
+    let client = Client::new().unwrap();
+
+    // Call stream_events with user filter
+    let events = client
+        .stream_events(&base_url, Some(&user_z32), Some(10), false)
+        .await
+        .expect("stream_events with user filter must succeed");
+
+    // Should get events (may include events from other users on shared testnet)
+    assert!(
+        !events.is_empty(),
+        "Expected events from homeserver with user filter, got empty list"
     );
 }

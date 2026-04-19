@@ -3,6 +3,7 @@ use pkarr::SignedPacket;
 use pubky::Pubky;
 use pubky::{Pkdns, PublicKey};
 
+use crate::commands::shared::parse_sse_batch;
 use crate::error::Result;
 
 /// Client wrapper around the pubky SDK with PKRR resolution helpers.
@@ -267,6 +268,58 @@ impl Client {
         }
 
         Ok((events, next_cursor))
+    }
+
+    /// Stream events from the /events-stream/ endpoint.
+    /// Returns parsed SSE events with path, cursor, and optional content_hash.
+    ///
+    /// * `base_url` — the homeserver base URL
+    /// * `user` — optional user public key filter (z32)
+    /// * `limit` — max events per batch
+    /// * `reverse` — reverse ordering (newest first)
+    pub async fn stream_events(
+        &self,
+        base_url: &str,
+        user: Option<&str>,
+        limit: Option<u64>,
+        reverse: bool,
+    ) -> Result<Vec<crate::commands::shared::SseEvent>> {
+        // Parse base_url as Url, join with /events-stream/ to avoid double slashes,
+        // then append query params.
+        let base = url::Url::parse(base_url).map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Invalid base URL '{base_url}': {e}"),
+            })
+        })?;
+        let mut url = base.join("/events-stream/").map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to join path: {e}"),
+            })
+        })?;
+        // Add query params using Url::query_pairs_mut for proper encoding
+        if let Some(u) = user {
+            url.query_pairs_mut().append_pair("user", u);
+        }
+        if let Some(l) = limit {
+            url.query_pairs_mut().append_pair("limit", &l.to_string());
+        }
+        if reverse {
+            url.query_pairs_mut().append_pair("reverse", "true");
+        }
+
+        let resp = reqwest::get(url.to_string()).await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to stream events: {e}"),
+            })
+        })?;
+        let text = resp.text().await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to read response: {e}"),
+            })
+        })?;
+
+        // Parse SSE format: key: value pairs separated by blank lines
+        Ok(parse_sse_batch(&text))
     }
 }
 

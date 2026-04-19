@@ -1,6 +1,7 @@
 use colored::Colorize;
 
 use crate::client::Client;
+use crate::commands::shared::resolve_homeserver_url;
 use crate::error::Result;
 
 /// Fetch and print recent file change events from a homeserver.
@@ -51,28 +52,6 @@ pub async fn cmd_events(homeserver: Option<&str>, limit: Option<u64>) -> Result<
     }
 
     Ok(())
-}
-
-/// Resolve a homeserver identifier to a full HTTP base URL.
-/// Tries the input directly as a URL, or resolves it via PKRR if it's a z32 key.
-async fn resolve_homeserver_url(client: &Client, input: &str) -> Result<String> {
-    // If it looks like a URL, use it directly
-    if input.starts_with("http://") || input.starts_with("https://") {
-        Ok(input.trim_end_matches('/').to_string())
-    } else {
-        // Try to resolve via PKRR
-        if let Ok(pk) = pubky::PublicKey::try_from(input) {
-            if let Some(info) = client.get_homeserver_address(&pk).await {
-                if let Some(domain) = info.homeserver_domain {
-                    return Ok(format!("https://{domain}"));
-                } else {
-                    return Ok(format!("https://_pubky.{}", info.homeserver_z32));
-                }
-            }
-        }
-        // Fall back to treating it as a domain
-        Ok(format!("https://{input}"))
-    }
 }
 
 /// Print a single event line with color coding.

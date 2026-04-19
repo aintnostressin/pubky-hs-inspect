@@ -4,6 +4,7 @@ use colored::Colorize;
 use crate::cli::{Cli, Commands};
 
 pub mod events;
+pub mod events_stream;
 pub mod inspect;
 pub mod inspect_user;
 pub mod ls;
@@ -23,6 +24,22 @@ pub async fn run(cli: &Cli) -> crate::error::Result<()> {
             // Use global URL as fallback if homeserver not provided
             let target = homeserver.as_deref().or(cli.url.as_deref()).or(Some(""));
             events::cmd_events(target, *limit).await
+        }
+        Some(Commands::EventsStream {
+            homeserver,
+            user,
+            limit,
+            reverse,
+            live,
+        }) => {
+            // Use global URL as fallback if homeserver not provided
+            let target = homeserver.as_deref().or(cli.url.as_deref()).or(Some(""));
+            let hs = if target.unwrap_or("") == "" {
+                None
+            } else {
+                target.map(|s| s.trim_end_matches('/'))
+            };
+            events_stream::cmd_events_stream(hs, user.as_deref(), *limit, *reverse, *live).await
         }
         None => {
             println!(
