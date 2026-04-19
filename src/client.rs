@@ -224,25 +224,24 @@ impl Client {
             url.push_str(&query_parts.join("&"));
         }
 
-        let resp = reqwest::get(&url)
-            .await
-            .map_err(|e| pubky::Error::Request(pubky::errors::RequestError::Validation {
+        let resp = reqwest::get(&url).await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
                 message: format!("Failed to fetch events: {e}"),
-            }))?;
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| pubky::Error::Request(pubky::errors::RequestError::Validation {
+            })
+        })?;
+        let text = resp.text().await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
                 message: format!("Failed to read response: {e}"),
-            }))?;
+            })
+        })?;
 
         // Parse response: last line is "cursor: N", rest are events
         let mut events = Vec::new();
         let mut next_cursor: Option<String> = None;
 
         for line in text.lines() {
-            if line.starts_with("cursor: ") {
-                next_cursor = Some(line["cursor: ".len()..].trim().to_string());
+            if let Some(stripped) = line.strip_prefix("cursor: ") {
+                next_cursor = Some(stripped.trim().to_string());
             } else if !line.is_empty() {
                 events.push(line.to_string());
             }

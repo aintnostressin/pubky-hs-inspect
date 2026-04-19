@@ -15,11 +15,8 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Some(Commands::Version) => cmd_version(),
         Some(Commands::Events { homeserver, limit }) => {
             // Use global URL as fallback if homeserver not provided
-            let target = homeserver
-                .as_deref()
-                .or(cli.url.as_deref())
-                .or(Some(""));
-            cmd_events(target, limit.clone()).await
+            let target = homeserver.as_deref().or(cli.url.as_deref()).or(Some(""));
+            cmd_events(target, *limit).await
         }
         None => {
             println!(
@@ -591,7 +588,10 @@ async fn cmd_events(homeserver: Option<&str>, limit: Option<u64>) -> Result<()> 
     let target = match homeserver {
         Some(hs) => hs.to_string(),
         None => {
-            eprintln!("{}", "Error: homeserver address required. Provide as argument or via -u/--url.".yellow());
+            eprintln!(
+                "{}",
+                "Error: homeserver address required. Provide as argument or via -u/--url.".yellow()
+            );
             return Ok(());
         }
     };
