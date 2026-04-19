@@ -735,22 +735,24 @@ async fn test_events_stream_live_consumption() {
     let timeout_duration = tokio::time::Duration::from_secs(10);
     let deadline = tokio::time::Instant::now() + timeout_duration;
 
-    while let Some(result) = tokio::time::timeout_at(deadline, stream.next()).await {
+    while let Some(result) = match tokio::time::timeout_at(deadline, stream.next()).await {
+        Ok(v) => v,
+        Err(_) => {
+            // Timeout — stop waiting
+            break;
+        }
+    } {
         match result {
-            Some(Ok(event)) => {
+            Ok(event) => {
                 events.push(event);
                 // Once we have enough events, stop — no need to wait for timeout
                 if events.len() >= 2 {
                     break;
                 }
             }
-            Some(Err(e)) => {
+            Err(e) => {
                 // Stream errors are acceptable — the endpoint may not be supported
                 eprintln!("Stream error: {e}");
-                break;
-            }
-            None => {
-                // Stream ended (EOF) — nothing more coming
                 break;
             }
         }
