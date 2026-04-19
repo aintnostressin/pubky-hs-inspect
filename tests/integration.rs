@@ -114,7 +114,11 @@ fn test_parse_ls_command_custom_path() {
 fn test_parse_events_command() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "events", "-l", "10", "events123key"]);
     match cli.command {
-        Some(Commands::Events { homeserver, limit, rev }) => {
+        Some(Commands::Events {
+            homeserver,
+            limit,
+            rev,
+        }) => {
             assert_eq!(homeserver, Some("events123key".to_string()));
             assert_eq!(limit, Some(10));
             assert!(!rev);
