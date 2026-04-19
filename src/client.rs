@@ -225,8 +225,7 @@ pub fn parse_input(input: &str) -> InputType {
 }
 
 fn is_valid_z32(s: &str) -> bool {
-    let z32_chars: std::collections::HashSet<char> =
-        "234567abcdefgjkmnpqrtvwxyz".chars().collect();
+    let z32_chars: std::collections::HashSet<char> = "234567abcdefgjkmnpqrtvwxyz".chars().collect();
     !s.is_empty() && s.chars().all(|c| z32_chars.contains(&c))
 }
 
@@ -322,10 +321,9 @@ mod tests {
             "User's key should be recognized as pubkey"
         );
         match parsed {
-            InputType::PublicKey(k) => assert_eq!(
-                k,
-                "8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty"
-            ),
+            InputType::PublicKey(k) => {
+                assert_eq!(k, "8um71us3fyw6h8wbcxb5ar3rwusy1a6u49956ikzojg3gcwd1dty")
+            }
             _ => panic!("expected PublicKey"),
         }
     }
