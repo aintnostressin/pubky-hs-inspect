@@ -578,7 +578,7 @@ async fn cmd_events(homeserver: Option<&str>, limit: Option<u64>) -> Result<()> 
     println!("Fetching events from: {base_url}");
     println!();
 
-    let (events, next_cursor) = match client.get_events(&base_url, limit).await {
+    let (events, next_cursor) = match client.get_events(&base_url, None, limit, None).await {
         Ok((events, cursor)) => (events, cursor),
         Err(e) => {
             eprintln!("Error fetching events: {e}");

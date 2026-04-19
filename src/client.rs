@@ -207,24 +207,43 @@ impl Client {
     ///
     /// Returns a tuple of (event lines, next_cursor).
     /// Each event line is in the format: "PUT pubky://user/path" or "DEL pubky://user/path"
+    ///
+    /// * `base_url` — the homeserver base URL (e.g. `https://_pubky.<z32>`).
+    /// * `cursor` — optional cursor for pagination (received from a previous response).
+    /// * `limit` — maximum number of events to fetch.
+    /// * `pubky_host` — optional homeserver z32 key to include as `pubky-host` query param
+    ///   (needed when the base URL doesn't encode a hostname, e.g. `http://127.0.0.1:<port>`).
     pub async fn get_events(
         &self,
         base_url: &str,
+        cursor: Option<&str>,
         limit: Option<u64>,
+        pubky_host: Option<&str>,
     ) -> Result<(Vec<String>, Option<String>)> {
-        let mut url = format!("{base_url}/_matrix/client/v3/events/");
-        let mut query_parts = Vec::new();
-
+        // Parse base_url as Url, join with /events/ to avoid double slashes,
+        // then append query params.
+        let base = url::Url::parse(base_url).map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Invalid base URL '{base_url}': {e}"),
+            })
+        })?;
+        let mut url = base.join("/events/").map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to join path: {e}"),
+            })
+        })?;
+        // Add query params using Url::query_pairs_mut for proper encoding
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
         if let Some(l) = limit {
-            query_parts.push(format!("limit={}", l));
+            url.query_pairs_mut().append_pair("limit", &l.to_string());
+        }
+        if let Some(pk) = pubky_host {
+            url.query_pairs_mut().append_pair("pubky-host", pk);
         }
 
-        if !query_parts.is_empty() {
-            url.push('?');
-            url.push_str(&query_parts.join("&"));
-        }
-
-        let resp = reqwest::get(&url).await.map_err(|e| {
+        let resp = reqwest::get(url.to_string()).await.map_err(|e| {
             pubky::Error::Request(pubky::errors::RequestError::Validation {
                 message: format!("Failed to fetch events: {e}"),
             })
