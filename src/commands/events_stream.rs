@@ -69,10 +69,28 @@ pub async fn cmd_events_stream(
     };
 
     let mut count = 0u64;
+    let mut has_events = false;
+
+    // Indicate we're waiting for live events
+    if live {
+        print!("  Waiting for new events...");
+    }
+
     loop {
         match stream.next().await {
             Some(Ok(event)) => {
-                print_sse_event(&event);
+                if !live {
+                    print_sse_event(&event);
+                } else {
+                    // In live mode, only print if we haven't shown the waiting message yet
+                    // or if we've already received some events
+                    if !has_events {
+                        // First event: replace "Waiting..." with the event
+                        print!("\r"); // Move to beginning of line
+                        has_events = true;
+                    }
+                    print_sse_event(&event);
+                }
                 count += 1;
                 if !live && count >= limit.unwrap_or(u64::MAX) {
                     break;
@@ -84,7 +102,25 @@ pub async fn cmd_events_stream(
             }
             None => {
                 // Stream ended (EOF)
-                if !live {
+                if live {
+                    if count == 0 {
+                        println!();
+                        eprintln!(
+                            "  {}",
+                            "Stream closed immediately — no events received.".yellow()
+                        );
+                        eprintln!(
+                            "  The /events-stream endpoint may not support live streaming on this homeserver."
+                        );
+                    } else {
+                        println!();
+                        println!(
+                            "  Stream closed after {} events. {}",
+                            count.to_string().green().bold(),
+                            "Press Ctrl+C to exit.".yellow()
+                        );
+                    }
+                } else {
                     println!();
                     println!("  {} events received.", count.to_string().green().bold());
                 }
