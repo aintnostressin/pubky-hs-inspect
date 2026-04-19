@@ -57,4 +57,15 @@ pub enum Commands {
 
     /// Show tool version
     Version,
+
+    /// Fetch and print recent file change events from a homeserver
+    Events {
+        /// Maximum number of events to fetch (optional)
+        #[arg(short, long, value_name = "N")]
+        limit: Option<u64>,
+
+        /// Homeserver key (z32), domain, or URL. Defaults to the global URL argument.
+        #[arg(value_name = "HOMESERVER")]
+        homeserver: Option<String>,
+    },
 }

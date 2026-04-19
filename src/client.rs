@@ -202,6 +202,53 @@ impl Client {
         let alt_url = format!("pubky://{z32}/pub/pubky.app/profile.json");
         self.get_json::<serde_json::Value>(&alt_url).await.ok()
     }
+
+    /// Fetch historical events from a homeserver's events feed endpoint.
+    ///
+    /// Returns a tuple of (event lines, next_cursor).
+    /// Each event line is in the format: "PUT pubky://user/path" or "DEL pubky://user/path"
+    pub async fn get_events(
+        &self,
+        base_url: &str,
+        limit: Option<u64>,
+    ) -> Result<(Vec<String>, Option<String>)> {
+        let mut url = format!("{base_url}/_matrix/client/v3/events/");
+        let mut query_parts = Vec::new();
+
+        if let Some(l) = limit {
+            query_parts.push(format!("limit={}", l));
+        }
+
+        if !query_parts.is_empty() {
+            url.push('?');
+            url.push_str(&query_parts.join("&"));
+        }
+
+        let resp = reqwest::get(&url).await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to fetch events: {e}"),
+            })
+        })?;
+        let text = resp.text().await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to read response: {e}"),
+            })
+        })?;
+
+        // Parse response: last line is "cursor: N", rest are events
+        let mut events = Vec::new();
+        let mut next_cursor: Option<String> = None;
+
+        for line in text.lines() {
+            if let Some(stripped) = line.strip_prefix("cursor: ") {
+                next_cursor = Some(stripped.trim().to_string());
+            } else if !line.is_empty() {
+                events.push(line.to_string());
+            }
+        }
+
+        Ok((events, next_cursor))
+    }
 }
 
 /// Information about a homeserver resolved from a PKRR record.
