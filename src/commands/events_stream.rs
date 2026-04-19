@@ -52,9 +52,21 @@ pub async fn cmd_events_stream(
     println!();
 
     // Stream events in real-time
-    let mut stream = client
+    let mut stream = match client
         .stream_events_streamed(&base_url, user, limit, reverse)
-        .await?;
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error starting stream: {e}");
+            println!();
+            println!(
+                "  {}",
+                "events-stream endpoint may not be supported by this homeserver".yellow()
+            );
+            return Ok(());
+        }
+    };
 
     let mut count = 0u64;
     loop {
@@ -74,10 +86,7 @@ pub async fn cmd_events_stream(
                 // Stream ended (EOF)
                 if !live {
                     println!();
-                    println!(
-                        "  {} events received.",
-                        count.to_string().green().bold()
-                    );
+                    println!("  {} events received.", count.to_string().green().bold());
                 }
                 break;
             }
