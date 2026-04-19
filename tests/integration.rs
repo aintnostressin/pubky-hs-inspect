@@ -733,26 +733,28 @@ async fn test_events_stream_live_consumption() {
 
     let mut events: Vec<pubky_hs_inspect::commands::shared::SseEvent> = Vec::new();
     let timeout_duration = tokio::time::Duration::from_secs(10);
-    let deadline = tokio::time::Instant::now() + timeout_duration;
 
-    while let Some(result) = match tokio::time::timeout_at(deadline, stream.next()).await {
-        Ok(v) => v,
-        Err(_) => {
-            // Timeout — stop waiting
+    loop {
+        if events.len() >= 2 {
             break;
         }
-    } {
+
+        let result = tokio::time::timeout(timeout_duration, stream.next()).await;
         match result {
-            Ok(event) => {
+            Ok(Some(Ok(event))) => {
                 events.push(event);
-                // Once we have enough events, stop — no need to wait for timeout
-                if events.len() >= 2 {
-                    break;
-                }
             }
-            Err(e) => {
+            Ok(Some(Err(e))) => {
                 // Stream errors are acceptable — the endpoint may not be supported
                 eprintln!("Stream error: {e}");
+                break;
+            }
+            Ok(None) => {
+                // Stream ended (EOF) — nothing more coming
+                break;
+            }
+            Err(_) => {
+                // Timeout — stop waiting
                 break;
             }
         }
