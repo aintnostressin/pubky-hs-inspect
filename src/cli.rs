@@ -68,4 +68,27 @@ pub enum Commands {
         #[arg(value_name = "HOMESERVER")]
         homeserver: Option<String>,
     },
+
+    /// Stream events from a homeserver in real-time via the /events-stream/ endpoint
+    EventsStream {
+        /// Filter events by user public key (z32 or PKRR key)
+        #[arg(long, short, value_name = "USER")]
+        user: Option<String>,
+
+        /// Maximum number of events to fetch (default: 20)
+        #[arg(long, short = 'n', value_name = "N")]
+        limit: Option<u64>,
+
+        /// Reverse the event order (newest first)
+        #[arg(long, short)]
+        reverse: bool,
+
+        /// Keep streaming live events indefinitely
+        #[arg(long)]
+        live: bool,
+
+        /// Homeserver key (z32), domain, or URL. Defaults to the global URL argument.
+        #[arg(value_name = "HOMESERVER")]
+        homeserver: Option<String>,
+    },
 }

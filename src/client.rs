@@ -1,9 +1,17 @@
+use futures::StreamExt;
 use pkarr::dns::rdata::RData;
 use pkarr::SignedPacket;
 use pubky::Pubky;
 use pubky::{Pkdns, PublicKey};
 
+use crate::commands::shared::{parse_sse_batch, SseEvent, SseEventStream};
 use crate::error::Result;
+
+/// Stream result type — used for both `stream_sse_events` and `Client::stream_events_streamed`
+type StreamResult<T> = std::result::Result<T, pubky::Error>;
+
+/// Type alias for boxed SSE event streams
+type EventStream = futures::stream::BoxStream<'static, std::result::Result<SseEvent, pubky::Error>>;
 
 /// Client wrapper around the pubky SDK with PKRR resolution helpers.
 pub struct Client {
@@ -268,6 +276,99 @@ impl Client {
 
         Ok((events, next_cursor))
     }
+
+    /// Stream events from the /events-stream/ endpoint.
+    /// Returns parsed SSE events with path, cursor, and optional content_hash.
+    ///
+    /// * `base_url` — the homeserver base URL
+    /// * `user` — optional user public key filter (z32)
+    /// * `limit` — max events per batch
+    /// * `reverse` — reverse ordering (newest first)
+    pub async fn stream_events(
+        &self,
+        base_url: &str,
+        user: Option<&str>,
+        limit: Option<u64>,
+        reverse: bool,
+    ) -> Result<Vec<crate::commands::shared::SseEvent>> {
+        // Parse base_url as Url, join with /events-stream/ to avoid double slashes,
+        // then append query params.
+        let base = url::Url::parse(base_url).map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Invalid base URL '{base_url}': {e}"),
+            })
+        })?;
+        let mut url = base.join("/events-stream/").map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to join path: {e}"),
+            })
+        })?;
+        // Add query params using Url::query_pairs_mut for proper encoding
+        if let Some(u) = user {
+            url.query_pairs_mut().append_pair("user", u);
+        }
+        if let Some(l) = limit {
+            url.query_pairs_mut().append_pair("limit", &l.to_string());
+        }
+        if reverse {
+            url.query_pairs_mut().append_pair("reverse", "true");
+        }
+
+        let resp = reqwest::get(url.to_string()).await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to stream events: {e}"),
+            })
+        })?;
+        let text = resp.text().await.map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to read response: {e}"),
+            })
+        })?;
+
+        // Parse SSE format: key: value pairs separated by blank lines
+        Ok(parse_sse_batch(&text))
+    }
+
+    /// Stream SSE events from a homeserver's `/events-stream/` endpoint in real time.
+    ///
+    /// Returns an async stream that yields `SseEvent` as they arrive from the server.
+    /// Events are printed immediately as they arrive (real-time streaming).
+    ///
+    /// * `base_url` — the homeserver base URL
+    /// * `user` — optional user public key filter (z32)
+    /// * `limit` — max events to stream before stopping (None = infinite)
+    /// * `reverse` — reverse ordering (newest first)
+    pub async fn stream_events_streamed(
+        &self,
+        base_url: &str,
+        user: Option<&str>,
+        limit: Option<u64>,
+        reverse: bool,
+    ) -> StreamResult<EventStream> {
+        // Build URL the same way as stream_events
+        let base = url::Url::parse(base_url).map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Invalid base URL '{base_url}': {e}"),
+            })
+        })?;
+        let mut url = base.join("/events-stream/").map_err(|e| {
+            pubky::Error::Request(pubky::errors::RequestError::Validation {
+                message: format!("Failed to join path: {e}"),
+            })
+        })?;
+        // Add query params using Url::query_pairs_mut for proper encoding
+        if let Some(u) = user {
+            url.query_pairs_mut().append_pair("user", u);
+        }
+        if let Some(l) = limit {
+            url.query_pairs_mut().append_pair("limit", &l.to_string());
+        }
+        if reverse {
+            url.query_pairs_mut().append_pair("reverse", "true");
+        }
+
+        stream_sse_events(url.to_string()).await
+    }
 }
 
 /// Information about a homeserver resolved from a PKRR record.
@@ -407,6 +508,20 @@ impl InputType {
     pub fn is_url(&self) -> bool {
         matches!(self, InputType::Url(_))
     }
+}
+
+/// An async stream of SSE events from the `/events-stream/` endpoint.
+///
+/// Reads from the server response line by line, parsing events as they arrive.
+/// Yields `SseEvent` immediately when an event block is complete (blank line or EOF).
+pub async fn stream_sse_events(url: String) -> StreamResult<EventStream> {
+    let resp = reqwest::get(&url).await.map_err(|e| {
+        pubky::Error::Request(pubky::errors::RequestError::Validation {
+            message: format!("Failed to stream events: {e}"),
+        })
+    })?;
+
+    Ok(SseEventStream::new(resp.bytes_stream()).boxed())
 }
 
 #[cfg(test)]
