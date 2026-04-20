@@ -244,6 +244,44 @@ fn test_parse_events_command_url_flag() {
     assert!(matches!(cli.command, Some(Commands::Events { .. })));
 }
 
+// ── Test: CLI parsing - read ───────────────────────────────────────
+
+#[test]
+fn test_parse_read_command() {
+    let cli = Cli::parse_from([
+        "pubky-hs-inspect",
+        "read",
+        "readuser123key456",
+        "/pub/my-file.txt",
+    ]);
+    match cli.command {
+        Some(Commands::Read { url, path }) => {
+            assert_eq!(url, "readuser123key456");
+            assert_eq!(path, "/pub/my-file.txt");
+        }
+        _ => panic!("expected Read command"),
+    }
+}
+
+// ── Test: CLI parsing - read with pubky:// URL ─────────────────────
+
+#[test]
+fn test_parse_read_command_with_url() {
+    let cli = Cli::parse_from([
+        "pubky-hs-inspect",
+        "read",
+        "pubky://abc123key456",
+        "/pub/document.json",
+    ]);
+    match cli.command {
+        Some(Commands::Read { url, path }) => {
+            assert_eq!(url, "pubky://abc123key456");
+            assert_eq!(path, "/pub/document.json");
+        }
+        _ => panic!("expected Read command"),
+    }
+}
+
 // ── Test: CLI parsing - no subcommand ──────────────────────────────
 
 #[test]
@@ -494,6 +532,58 @@ async fn test_ls_listing_integration() {
     assert!(
         result.is_ok(),
         "ls command with path should succeed against testnet"
+    );
+}
+
+/// Test read against a local testnet.
+/// Verifies that the read command correctly fetches and displays
+/// file content from a user's storage on a local homeserver.
+#[tokio::test]
+async fn test_read_file_integration() {
+    let ctx = setup_testnet().await;
+    let (session, user_z32) = create_test_user(&ctx).await;
+
+    // Upload a test file
+    session
+        .storage()
+        .put("/pub/read-test.txt", "Hello from the testnet!")
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+
+    // Run the read command
+    let cli = Cli::parse_from(["pubky-hs-inspect", "read", &user_z32, "/pub/read-test.txt"]);
+    let result = commands::run(&cli).await;
+    assert!(
+        result.is_ok(),
+        "read command should succeed against testnet"
+    );
+}
+
+/// Test read with a JSON file against a local testnet.
+/// Verifies that the read command correctly fetches and pretty-prints
+/// JSON content from a user's storage.
+#[tokio::test]
+async fn test_read_json_file_integration() {
+    let ctx = setup_testnet().await;
+    let (session, user_z32) = create_test_user(&ctx).await;
+
+    // Upload a JSON file
+    session
+        .storage()
+        .put("/pub/profile.json", r#"{"name":"test","value":42}"#)
+        .await
+        .expect("file upload should succeed")
+        .error_for_status()
+        .unwrap();
+
+    // Run the read command
+    let cli = Cli::parse_from(["pubky-hs-inspect", "read", &user_z32, "/pub/profile.json"]);
+    let result = commands::run(&cli).await;
+    assert!(
+        result.is_ok(),
+        "read command should succeed for JSON file against testnet"
     );
 }
 
