@@ -9,6 +9,7 @@ pub mod inspect;
 pub mod inspect_user;
 pub mod ls;
 pub mod pkdns;
+pub mod read;
 pub mod shared;
 pub mod storage;
 
@@ -19,6 +20,7 @@ pub async fn run(cli: &Cli) -> crate::error::Result<()> {
         Some(Commands::Pkdns { url }) => pkdns::cmd_pkdns(url).await,
         Some(Commands::Storage { url }) => storage::cmd_storage(url).await,
         Some(Commands::Ls { url, path }) => ls::cmd_ls(url, path).await,
+        Some(Commands::Read { url, path }) => read::cmd_read(url.clone(), path.clone()).await,
         Some(Commands::Version) => shared::cmd_version(),
         Some(Commands::Events {
             homeserver,

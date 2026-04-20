@@ -55,6 +55,17 @@ pub enum Commands {
         path: String,
     },
 
+    /// Read a file from a user's storage
+    Read {
+        /// PKRR public key (z32) or pubky:// URL of a user
+        #[arg(value_name = "KEY_OR_URL")]
+        url: String,
+
+        /// File path within storage (e.g. /pub/my-file.txt)
+        #[arg(value_name = "PATH")]
+        path: String,
+    },
+
     /// Show tool version
     Version,
 
