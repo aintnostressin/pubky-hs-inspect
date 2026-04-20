@@ -5,7 +5,7 @@ use crate::commands::shared::resolve_homeserver_url;
 use crate::error::Result;
 
 /// Fetch and print recent file change events from a homeserver.
-pub async fn cmd_events(homeserver: Option<&str>, limit: Option<u64>) -> Result<()> {
+pub async fn cmd_events(homeserver: Option<&str>, limit: Option<u64>, rev: bool) -> Result<()> {
     let client = Client::new()?;
     println!("{}", "═══ Homeserver Events ═══".bold().cyan());
     println!();
@@ -28,7 +28,7 @@ pub async fn cmd_events(homeserver: Option<&str>, limit: Option<u64>) -> Result<
     println!("Fetching events from: {base_url}");
     println!();
 
-    let (events, next_cursor) = match client.get_events(&base_url, None, limit, None).await {
+    let (events, next_cursor) = match client.get_events(&base_url, None, limit, None, rev).await {
         Ok((events, cursor)) => (events, cursor),
         Err(e) => {
             eprintln!("Error fetching events: {e}");

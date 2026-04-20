@@ -64,6 +64,10 @@ pub enum Commands {
         #[arg(short, long, value_name = "N")]
         limit: Option<u64>,
 
+        /// Fetch events in reverse chronological order
+        #[arg(short, long)]
+        rev: bool,
+
         /// Homeserver key (z32), domain, or URL. Defaults to the global URL argument.
         #[arg(value_name = "HOMESERVER")]
         homeserver: Option<String>,

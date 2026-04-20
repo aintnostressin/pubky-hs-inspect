@@ -221,12 +221,14 @@ impl Client {
     /// * `limit` — maximum number of events to fetch.
     /// * `pubky_host` — optional homeserver z32 key to include as `pubky-host` query param
     ///   (needed when the base URL doesn't encode a hostname, e.g. `http://127.0.0.1:<port>`).
+    /// * `reverse` — if true, include `reverse=true` query parameter for reverse chronological order.
     pub async fn get_events(
         &self,
         base_url: &str,
         cursor: Option<&str>,
         limit: Option<u64>,
         pubky_host: Option<&str>,
+        reverse: bool,
     ) -> Result<(Vec<String>, Option<String>)> {
         // Parse base_url as Url, join with /events/ to avoid double slashes,
         // then append query params.
@@ -249,6 +251,9 @@ impl Client {
         }
         if let Some(pk) = pubky_host {
             url.query_pairs_mut().append_pair("pubky-host", pk);
+        }
+        if reverse {
+            url.query_pairs_mut().append_pair("reverse", "true");
         }
 
         let resp = reqwest::get(url.to_string()).await.map_err(|e| {

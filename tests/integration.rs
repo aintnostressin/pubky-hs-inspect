@@ -115,9 +115,14 @@ fn test_parse_ls_command_custom_path() {
 fn test_parse_events_command() {
     let cli = Cli::parse_from(["pubky-hs-inspect", "events", "-l", "10", "events123key"]);
     match cli.command {
-        Some(Commands::Events { homeserver, limit }) => {
+        Some(Commands::Events {
+            homeserver,
+            limit,
+            rev,
+        }) => {
             assert_eq!(homeserver, Some("events123key".to_string()));
             assert_eq!(limit, Some(10));
+            assert!(!rev);
         }
         _ => panic!("expected Events command"),
     }
@@ -527,7 +532,7 @@ async fn test_events_integration() {
 
     // Call get_events and verify the response.
     let (events, _next_cursor) = client
-        .get_events(&base_url, None, Some(10), Some(&hs_z32))
+        .get_events(&base_url, None, Some(10), Some(&hs_z32), false)
         .await
         .expect("get_events must succeed — homeserver returned an error");
 
@@ -553,6 +558,30 @@ async fn test_events_integration() {
     assert!(
         result.is_ok(),
         "events command should succeed against testnet"
+    );
+
+    // ── Verify get_events accepts the reverse parameter without errors ──
+
+    // Fetch events in forward order
+    let (events_fwd, _) = client
+        .get_events(&base_url, None, Some(20), Some(&hs_z32), false)
+        .await
+        .expect("get_events forward must succeed");
+
+    // Fetch events in reverse order — the parameter must be accepted
+    // (homeserver may not implement actual reversal yet, so we don't assert order)
+    let (events_rev, _) = client
+        .get_events(&base_url, None, Some(20), Some(&hs_z32), true)
+        .await
+        .expect("get_events reverse must succeed");
+
+    // Both should return the same number of events
+    assert_eq!(
+        events_fwd.len(),
+        events_rev.len(),
+        "Forward and reverse queries should return the same number of events (got fwd={}, rev={})",
+        events_fwd.len(),
+        events_rev.len()
     );
 }
 
