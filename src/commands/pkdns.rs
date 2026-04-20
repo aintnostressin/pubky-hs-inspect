@@ -61,8 +61,8 @@ pub async fn cmd_pkdns(input: &str) -> Result<()> {
             if let Some(info) = client.get_homeserver_address(&pk).await {
                 println!();
                 println!("{}", "▸ Transport URL".bold());
-                let base = if info.homeserver_domain.is_some() {
-                    format!("https://{}/", info.homeserver_z32)
+                let base = if let Some(ref domain) = info.homeserver_domain {
+                    format!("https://{domain}/")
                 } else {
                     format!("https://_pubky.{}/", info.homeserver_z32)
                 };

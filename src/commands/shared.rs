@@ -14,8 +14,8 @@ pub fn print_homeserver_info(info: &HomeserverInfo) {
     println!("   Record PK:   {}", info.record_public_key);
     println!("   Status:      {}", "resolved ✓".green());
 
-    let base = if info.homeserver_domain.is_some() {
-        format!("https://{}/", info.homeserver_z32)
+    let base = if let Some(ref domain) = info.homeserver_domain {
+        format!("https://{domain}/")
     } else {
         format!("https://_pubky.{}/", info.homeserver_z32)
     };
